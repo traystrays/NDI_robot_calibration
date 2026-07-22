@@ -30,6 +30,8 @@ def parse_timestamps(data: pd.DataFrame, timestamp_column: str) -> pd.DataFrame:
     data[timestamp_column] = pd.to_datetime(
         data[timestamp_column], unit="us", utc=True, errors="coerce"
     ).dt.tz_convert("America/Vancouver")
+
+    
     return data
 
 
@@ -96,14 +98,17 @@ def extract_position(data: pd.DataFrame, arm_column: str) -> pd.DataFrame:
     return value
 
 def clean_si_data(
-    csv_path: PathLike, timestamp_column: str, arm_column: str
-) -> pd.DataFrame:
+    csv_path: PathLike, timestamp_column: str, arm_column: str) -> pd.DataFrame:
     """
     Load SI data from CSV, parse timestamps, and extract position data.
     Returns a cleaned DataFrame with timestamps and Transforms.
     """
     # Load the data
     raw_data = load_si_data(csv_path)
+    raw_data = raw_data.drop_duplicates(
+      subset="api_cnt",
+      keep="first",
+  ).reset_index(drop=True)
 
     # Parse timestamps
     time_data = parse_timestamps(raw_data, timestamp_column)
