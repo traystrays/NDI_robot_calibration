@@ -1,13 +1,20 @@
+from pathlib import Path
+from typing import TypeAlias
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
-def load_si_data(csv_path: Path) -> pd.DataFrame:
+# accepts Path or string
+PathLike: TypeAlias = str | Path
+
+
+def load_si_data(csv_path: PathLike) -> pd.DataFrame:
     """
     Load the SI data from a CSV file, returns a pd.DataFrame.
     """
-    if not csv_path.exists():
-        raise FileNotFoundError(f"SI data file not found:{csv_path}")
+    csv_path = Path(csv_path)
+    if not csv_path.is_file():
+        raise FileNotFoundError(f"SI data file not found: {csv_path}")
 
     return pd.read_csv(csv_path)
 
@@ -19,20 +26,27 @@ def parse_timestamps(data: pd.DataFrame, timestamp_column: str) -> pd.DataFrame:
     if timestamp_column not in data.columns:
         raise ValueError(f"Timestamp column '{timestamp_column}' not found in data.")
 
-    data[timestamp_column] = pd.to_datetime(data[timestamp_column], unit='us', utc=True, errors='coerce').dt.tz_convert('America/Vancouver')
+    data = data.copy()
+    data[timestamp_column] = pd.to_datetime(
+        data[timestamp_column], unit="us", utc=True, errors="coerce"
+    ).dt.tz_convert("America/Vancouver")
     return data
 
-def pose_to_transform(row:pd.Series):
+
+def pose_to_transform(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert a row of pose data into 4x4 transform matrix, 3x3 rotational matrix, and 3x1 translation vector.
     """
-    t = np.array([row["pos x"], row["pos y"], row["pos z"]], dtype=float)
+    t = np.array([row["pos_x"], row["pos_y"], row["pos_z"]], dtype=float)
 
-    R = np.array([
-                [row["o0"], row["o1"], row["o2"]],
-                [row["o3"], row["o4"], row["o5"]],
-                [row["o6"], row["o7"], row["o8"]],
-            ], dtype=float)
+    R = np.array(
+        [
+            [row["r00"], row["r01"], row["r02"]],
+            [row["r10"], row["r11"], row["r12"]],
+            [row["r20"], row["r21"], row["r22"]],
+        ],
+        dtype=float,
+    )
 
     T = np.eye(4, dtype=float)
     T[:3, :3] = R
@@ -48,6 +62,11 @@ def extract_position(data: pd.DataFrame, arm_column: str) -> pd.DataFrame:
         raise ValueError(f"Arm column '{arm_column}' not found in data.")
     
     start = data.columns.get_loc(arm_column)
+    
+    # just to be safe 
+    if not isinstance(start, int):
+        raise ValueError(f"Expected integer index for arm column '{arm_column}', got {type(start)}")
+    
     val_start = start + 1
     val_end = val_start + 12
     value = data.iloc[:, val_start:val_end].copy()
@@ -56,27 +75,29 @@ def extract_position(data: pd.DataFrame, arm_column: str) -> pd.DataFrame:
         raise ValueError(
             f"Expected 12 pose columns after {arm_column!r}; "
             f"found {value.shape[1]}"
-          )
+        )
     
     # Rename values to match transformation structure
     value.columns = [
-          "pos_x",
-          "pos_y",
-          "pos_z",
-          "r00",
-          "r01",
-          "r02",
-          "r10",
-          "r11",
-          "r12",
-          "r20",
-          "r21",
-          "r22",
-      ]
+        "pos_x",
+        "pos_y",
+        "pos_z",
+        "r00",
+        "r01",
+        "r02",
+        "r10",
+        "r11",
+        "r12",
+        "r20",
+        "r21",
+        "r22",
+    ]
     
     return value
 
-def clean_si_data(csv_path: Path, timestamp_column: str, arm_column: str) -> pd.DataFrame:
+def clean_si_data(
+    csv_path: PathLike, timestamp_column: str, arm_column: str
+) -> pd.DataFrame:
     """
     Load SI data from CSV, parse timestamps, and extract position data.
     Returns a cleaned DataFrame with timestamps and Transforms.
@@ -90,14 +111,8 @@ def clean_si_data(csv_path: Path, timestamp_column: str, arm_column: str) -> pd.
     # Extract position data
     position_data = extract_position(raw_data, arm_column)
 
-    Transforms = []
+    transforms = [pose_to_transform(row)[0] for _, row in position_data.iterrows()]
 
-    for idx, row in position_data.iterrows():
-        T, _, _ = pose_to_transform(row)
-        Transforms.append(T)
-
-    cleaned_data = pd.DataFrame({"timestamp":time_data[timestamp_column], 
-                                 "Transforms": Transforms})
-    
-    return cleaned_data
-
+    return pd.DataFrame(
+        {"timestamp": time_data[timestamp_column], "Transforms": transforms}
+    )

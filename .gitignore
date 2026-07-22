@@ -1,2 +1,9 @@
 # videos
 *.mp4
+
+# venv
+.venv/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
