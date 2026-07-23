@@ -76,6 +76,7 @@ def extract_position(data: pd.DataFrame) -> pd.DataFrame:
 
 def pose_to_transform(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
+    Multiply by 0.001 to convert to meters.
     Convert a row of pose data into 4x4 transform matrix, 3x3 rotational matrix, and 3x1 translation vector.
     """
     t = np.array([row["pos_x"], row["pos_y"], row["pos_z"]], dtype=float)
@@ -91,7 +92,7 @@ def pose_to_transform(row: pd.Series) -> tuple[np.ndarray, np.ndarray, np.ndarra
 
     T = np.eye(4, dtype=float)
     T[:3, :3] = R
-    T[:3, 3] = t
+    T[:3, 3] = t * 0.001
 
     return T, R, t
 

@@ -33,7 +33,7 @@ class MotionPair:
 class Calibration:
     """
     Calibrate the robot base to the NDI coordinate system.
-    See README.md for details on Calibration Equations. 
+    See README.md for details on the Calibration. 
 
     Frame convention:
 
@@ -65,7 +65,6 @@ class Calibration:
         min_index_separation: int = 1,
         max_rotation_disagreement_deg: float = 2.0,
         max_pairs: int | None = 500,
-        ndi_translation_scale: float = 0.001,
     ) -> None:
         if not isinstance(ndi_transforms, pd.Series):
             raise TypeError("ndi_transforms must be a pandas Series.")
@@ -81,8 +80,6 @@ class Calibration:
             raise ValueError("min_index_separation must be at least 1.")
         if max_pairs is not None and max_pairs < 3:
             raise ValueError("max_pairs must be at least 3 or None.")
-        if ndi_translation_scale <= 0:
-            raise ValueError("ndi_translation_scale must be positive.")
 
         self.ndi_transforms = ndi_transforms.reset_index(drop=True)
         self.si_transforms = si_transforms.reset_index(drop=True)
@@ -93,7 +90,6 @@ class Calibration:
             max_rotation_disagreement_deg
         )
         self.max_pairs = max_pairs
-        self.ndi_translation_scale = float(ndi_translation_scale)
 
         self.valid_indices: list[int] = []
         self.invalid_indices: list[int] = []
@@ -122,7 +118,6 @@ class Calibration:
                 continue
 
             ndi_transform = as_transform(ndi_value).copy()
-            ndi_transform[:3, 3] *= self.ndi_translation_scale
             si_transform = as_transform(si_value).copy()
 
             self.valid_indices.append(index)
