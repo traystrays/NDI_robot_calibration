@@ -7,13 +7,107 @@ import pandas as pd
 
 from .transforms import (
     as_transform,
-    ax_xb_errors,
+    invert_transform,
     is_valid_transform,
-    left_relative_transform,
+    proper_rotation,
     rotation_angle_degrees,
-    solve_ax_xb,
     translation_distance,
 )
+
+
+def solve_ax_xb(
+    a_matrices: list[np.ndarray],
+    b_matrices: list[np.ndarray],
+) -> np.ndarray:
+    """Solve ``A X = X B`` by linear least squares.
+
+    Rotation is found from the Kronecker-product system and projected onto
+    SO(3). Translation is then found from a second least-squares system.
+    Motions about multiple, non-parallel axes are required.
+    """
+    if len(a_matrices) != len(b_matrices):
+        raise ValueError("A and B must contain the same number of motions.")
+    if len(a_matrices) < 3:
+        raise ValueError("At least three motion pairs are required.")
+
+    a_values = [as_transform(item) for item in a_matrices]
+    b_values = [as_transform(item) for item in b_matrices]
+
+    rotation_system = np.vstack(
+        [
+            np.kron(np.eye(3), a[:3, :3])
+            - np.kron(b[:3, :3].T, np.eye(3))
+            for a, b in zip(a_values, b_values)
+        ]
+    )
+    _, singular_values, vt_matrix = np.linalg.svd(rotation_system)
+    raw_rotation = vt_matrix[-1].reshape((3, 3), order="F")
+
+    # The homogeneous solution has arbitrary sign and scale.
+    if np.linalg.det(raw_rotation) < 0:
+        raw_rotation *= -1
+    rotation_x = proper_rotation(raw_rotation)
+
+    translation_system = np.vstack(
+        [a[:3, :3] - np.eye(3) for a in a_values]
+    )
+    translation_rhs = np.concatenate(
+        [
+            rotation_x @ b[:3, 3] - a[:3, 3]
+            for a, b in zip(a_values, b_values)
+        ]
+    )
+
+    if np.linalg.matrix_rank(translation_system) < 3:
+        raise ValueError(
+            "Selected motions do not contain enough translation/rotation "
+            "diversity to determine the calibration."
+        )
+
+    translation_x, _, _, _ = np.linalg.lstsq(
+        translation_system, translation_rhs, rcond=None
+    )
+
+    result = np.eye(4, dtype=float)
+    result[:3, :3] = rotation_x
+    result[:3, 3] = translation_x
+
+    scale = singular_values[0] if singular_values[0] > 0 else 1.0
+    if singular_values[-2] / scale < 1e-10:
+        raise ValueError(
+            "Selected motions are rotationally degenerate; collect rotations "
+            "about multiple axes."
+        )
+
+    return result
+
+
+def ax_xb_errors(
+    a_matrices: list[np.ndarray],
+    b_matrices: list[np.ndarray],
+    x_transform: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-pair AX=XB rotation and translation errors."""
+    if len(a_matrices) != len(b_matrices):
+        raise ValueError("A and B must contain the same number of motions.")
+
+    x_transform = as_transform(x_transform)
+    rotation_errors = []
+    translation_errors = []
+
+    for a_value, b_value in zip(a_matrices, b_matrices):
+        left = as_transform(a_value) @ x_transform
+        right = x_transform @ as_transform(b_value)
+        residual = invert_transform(left) @ right
+
+        rotation_errors.append(
+            rotation_angle_degrees(residual[:3, :3])
+        )
+        translation_errors.append(
+            np.linalg.norm(residual[:3, 3])
+        )
+
+    return np.asarray(rotation_errors), np.asarray(translation_errors)
 
 
 @dataclass(frozen=True)
@@ -143,11 +237,13 @@ class Calibration:
                 if index_j - index_i < self.min_index_separation:
                     continue
 
-                a_matrix = left_relative_transform(
-                    self._valid_si[index_i], self._valid_si[index_j]
+                a_matrix = (
+                    self._valid_si[index_j]
+                    @ invert_transform(self._valid_si[index_i])
                 )
-                b_matrix = left_relative_transform(
-                    self._valid_ndi[index_i], self._valid_ndi[index_j]
+                b_matrix = (
+                    self._valid_ndi[index_j]
+                    @ invert_transform(self._valid_ndi[index_i])
                 )
 
                 si_rotation = rotation_angle_degrees(a_matrix[:3, :3])
