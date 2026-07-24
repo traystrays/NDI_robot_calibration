@@ -1,4 +1,4 @@
-"""Hand-eye and robot-base-to-NDI calibration workflow."""
+"""Classic AX=XB Hand-eye calibration workflow."""
 
 from dataclasses import dataclass
 
@@ -11,103 +11,7 @@ from .transforms import (
     is_valid_transform,
     proper_rotation,
     rotation_angle_degrees,
-    translation_distance,
 )
-
-
-def solve_ax_xb(
-    a_matrices: list[np.ndarray],
-    b_matrices: list[np.ndarray],
-) -> np.ndarray:
-    """Solve ``A X = X B`` by linear least squares.
-
-    Rotation is found from the Kronecker-product system and projected onto
-    SO(3). Translation is then found from a second least-squares system.
-    Motions about multiple, non-parallel axes are required.
-    """
-    if len(a_matrices) != len(b_matrices):
-        raise ValueError("A and B must contain the same number of motions.")
-    if len(a_matrices) < 3:
-        raise ValueError("At least three motion pairs are required.")
-
-    a_values = [as_transform(item) for item in a_matrices]
-    b_values = [as_transform(item) for item in b_matrices]
-
-    rotation_system = np.vstack(
-        [
-            np.kron(np.eye(3), a[:3, :3])
-            - np.kron(b[:3, :3].T, np.eye(3))
-            for a, b in zip(a_values, b_values)
-        ]
-    )
-    _, singular_values, vt_matrix = np.linalg.svd(rotation_system)
-    raw_rotation = vt_matrix[-1].reshape((3, 3), order="F")
-
-    # The homogeneous solution has arbitrary sign and scale.
-    if np.linalg.det(raw_rotation) < 0:
-        raw_rotation *= -1
-    rotation_x = proper_rotation(raw_rotation)
-
-    translation_system = np.vstack(
-        [a[:3, :3] - np.eye(3) for a in a_values]
-    )
-    translation_rhs = np.concatenate(
-        [
-            rotation_x @ b[:3, 3] - a[:3, 3]
-            for a, b in zip(a_values, b_values)
-        ]
-    )
-
-    if np.linalg.matrix_rank(translation_system) < 3:
-        raise ValueError(
-            "Selected motions do not contain enough translation/rotation "
-            "diversity to determine the calibration."
-        )
-
-    translation_x, _, _, _ = np.linalg.lstsq(
-        translation_system, translation_rhs, rcond=None
-    )
-
-    result = np.eye(4, dtype=float)
-    result[:3, :3] = rotation_x
-    result[:3, 3] = translation_x
-
-    scale = singular_values[0] if singular_values[0] > 0 else 1.0
-    if singular_values[-2] / scale < 1e-10:
-        raise ValueError(
-            "Selected motions are rotationally degenerate; collect rotations "
-            "about multiple axes."
-        )
-
-    return result
-
-
-def ax_xb_errors(
-    a_matrices: list[np.ndarray],
-    b_matrices: list[np.ndarray],
-    x_transform: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return per-pair AX=XB rotation and translation errors."""
-    if len(a_matrices) != len(b_matrices):
-        raise ValueError("A and B must contain the same number of motions.")
-
-    x_transform = as_transform(x_transform)
-    rotation_errors = []
-    translation_errors = []
-
-    for a_value, b_value in zip(a_matrices, b_matrices):
-        left = as_transform(a_value) @ x_transform
-        right = x_transform @ as_transform(b_value)
-        residual = invert_transform(left) @ right
-
-        rotation_errors.append(
-            rotation_angle_degrees(residual[:3, :3])
-        )
-        translation_errors.append(
-            np.linalg.norm(residual[:3, 3])
-        )
-
-    return np.asarray(rotation_errors), np.asarray(translation_errors)
 
 
 @dataclass(frozen=True)
@@ -126,7 +30,7 @@ class MotionPair:
 
 class Calibration:
     """
-    Calibrate the robot base to the NDI coordinate system.
+    Map robot-base coordinates into the NDI coordinate system.
     See README.md for details on the Calibration. 
 
     Frame convention:
@@ -134,13 +38,14 @@ class Calibration:
     * SI values are ``base_T_end_effector``.
     * NDI values are ``ndi_T_marker``.
     * EE to NDI marker rigid transform ``end_effector_T_marker`` is eliminated.
-    * ``base_T_ndi`` is solved as ``X`` in ``A X = X B``.
+    * ``ndi_T_base`` is solved as ``X`` in ``A X = X B``.
 
-    Given ``P_i = base_T_end_effector_i`` and ``Q_i = ndi_T_marker_i``, the
-    absolute relationship is ``P_i C = X Q_i``, where ``C`` is the unknown
-    attachment and ``X = base_T_ndi``. For observations ``i`` and ``j``:
+    Given ``P_i = base_T_end_effector_i`` and ``Q_i = ndi_T_marker_i``,
+    the absolute relationship is ``Q_i = X P_i C``, where ``C`` is the
+    unknown attachment and ``X = ndi_T_base``. For observations ``i`` and
+    ``j``:
 
-    ``(P_j inverse(P_i)) X = X (Q_j inverse(Q_i))``.
+    ``(Q_j inverse(Q_i)) X = X (P_j inverse(P_i))``.
 
     Thus the attachment ``C`` does not need to be known or estimated.
 
@@ -188,7 +93,7 @@ class Calibration:
         self.valid_indices: list[int] = []
         self.invalid_indices: list[int] = []
         self.motion_pairs: list[MotionPair] = []
-        self.base_T_ndi: np.ndarray | None = None
+        self.ndi_T_base: np.ndarray | None = None
         self.metrics: dict[str, float | int] = {}
 
         self._valid_si: dict[int, np.ndarray] = {}
@@ -230,61 +135,119 @@ class Calibration:
         if not self.valid_indices:
             self.validate_observations()
 
+        # Do not materialize every possible pair. For n observations that
+        # would require n(n-1)/2 matrices. Instead, sample observations evenly
+        # across the recording, expanding the sample only if the filters leave
+        # too few pairs.
+        observation_count = len(self.valid_indices)
+        if self.max_pairs is None:
+            sample_sizes = [observation_count]
+        else:
+            initial_size = max(
+                10,
+                int(np.ceil(np.sqrt(2 * self.max_pairs))) + 1,
+            )
+            maximum_size = min(
+                observation_count,
+                max(initial_size, 4 * initial_size),
+            )
+            sample_sizes = []
+            sample_size = min(observation_count, initial_size)
+            while True:
+                sample_sizes.append(sample_size)
+                if sample_size >= maximum_size:
+                    break
+                sample_size = min(maximum_size, sample_size * 2)
+
         candidates: list[tuple[float, MotionPair]] = []
+        for sample_size in sample_sizes:
+            sample_positions = np.linspace(
+                0,
+                observation_count - 1,
+                num=sample_size,
+                dtype=int,
+            )
+            sampled_indices = [
+                self.valid_indices[position]
+                for position in np.unique(sample_positions)
+            ]
+            candidates = []
 
-        for position, index_i in enumerate(self.valid_indices):
-            for index_j in self.valid_indices[position + 1 :]:
-                if index_j - index_i < self.min_index_separation:
-                    continue
+            for position, index_i in enumerate(sampled_indices):
+                for index_j in sampled_indices[position + 1:]:
+                    if index_j - index_i < self.min_index_separation:
+                        continue
 
-                a_matrix = (
-                    self._valid_si[index_j]
-                    @ invert_transform(self._valid_si[index_i])
-                )
-                b_matrix = (
-                    self._valid_ndi[index_j]
-                    @ invert_transform(self._valid_ndi[index_i])
-                )
+                    si_i = self._valid_si[index_i]
+                    si_j = self._valid_si[index_j]
+                    ndi_i = self._valid_ndi[index_i]
+                    ndi_j = self._valid_ndi[index_j]
 
-                si_rotation = rotation_angle_degrees(a_matrix[:3, :3])
-                ndi_rotation = rotation_angle_degrees(b_matrix[:3, :3])
-                si_translation = translation_distance(a_matrix)
-                ndi_translation = translation_distance(b_matrix)
+                    # Check changes between the absolute observations before
+                    # constructing A and B.
+                    si_relative_rotation = (
+                        si_j[:3, :3] @ si_i[:3, :3].T
+                    )
+                    ndi_relative_rotation = (
+                        ndi_j[:3, :3] @ ndi_i[:3, :3].T
+                    )
+                    si_rotation = rotation_angle_degrees(
+                        si_relative_rotation
+                    )
+                    ndi_rotation = rotation_angle_degrees(
+                        ndi_relative_rotation
+                    )
+                    si_translation = float(
+                        np.linalg.norm(si_j[:3, 3] - si_i[:3, 3])
+                    )
+                    ndi_translation = float(
+                        np.linalg.norm(ndi_j[:3, 3] - ndi_i[:3, 3])
+                    )
 
-                if (
-                    si_rotation < self.min_rotation_deg
-                    or ndi_rotation < self.min_rotation_deg
-                    or si_translation < self.min_translation
-                    or ndi_translation < self.min_translation
-                ):
-                    continue
+                    if (
+                        si_rotation < self.min_rotation_deg
+                        or ndi_rotation < self.min_rotation_deg
+                        or si_translation < self.min_translation
+                        or ndi_translation < self.min_translation
+                    ):
+                        continue
 
-                # Conjugate rotations in AX=XB have the same angle. A large
-                # disagreement usually indicates a bad timestamp match.
-                if (
-                    abs(si_rotation - ndi_rotation)
-                    > self.max_rotation_disagreement_deg
-                ):
-                    continue
+                    # Rotation-disagreement filtering is temporarily disabled.
+                    # if (
+                    #     abs(si_rotation - ndi_rotation)
+                    #     > self.max_rotation_disagreement_deg
+                    # ):
+                    #     continue
 
-                pair = MotionPair(
-                    index_i=index_i,
-                    index_j=index_j,
-                    a_matrix=a_matrix,
-                    b_matrix=b_matrix,
-                    si_rotation_deg=si_rotation,
-                    ndi_rotation_deg=ndi_rotation,
-                    si_translation=si_translation,
-                    ndi_translation=ndi_translation,
-                )
-                score = min(si_rotation, ndi_rotation) + 100.0 * min(
-                    si_translation, ndi_translation
-                )
-                candidates.append((score, pair))
+                    # A X = X B with X = ndi_T_base.
+                    a_matrix = ndi_j @ invert_transform(ndi_i)
+                    b_matrix = si_j @ invert_transform(si_i)
+
+                    pair = MotionPair(
+                        index_i=index_i,
+                        index_j=index_j,
+                        a_matrix=a_matrix,
+                        b_matrix=b_matrix,
+                        si_rotation_deg=si_rotation,
+                        ndi_rotation_deg=ndi_rotation,
+                        si_translation=si_translation,
+                        ndi_translation=ndi_translation,
+                    )
+                    score = min(si_rotation, ndi_rotation) + 100.0 * min(
+                        si_translation, ndi_translation
+                    )
+                    candidates.append((score, pair))
+
+            if (
+                self.max_pairs is None
+                or len(candidates) >= self.max_pairs
+                or sample_size == sample_sizes[-1]
+            ):
+                break
 
         candidates.sort(key=lambda item: item[0], reverse=True)
         if self.max_pairs is not None:
-            candidates = candidates[: self.max_pairs]
+            candidates = candidates[:self.max_pairs]
         self.motion_pairs = [pair for _, pair in candidates]
 
         if len(self.motion_pairs) < 3:
@@ -295,27 +258,96 @@ class Calibration:
 
         return self.motion_pairs.copy()
 
-    def solve_base_to_ndi(self) -> np.ndarray:
-        """Solve ``A X = X B`` and return ``base_T_ndi`` directly."""
+    def solve_ax_xb(self) -> np.ndarray:
+        """Solve ``A X = X B`` and store ``X`` as ``ndi_T_base``."""
         if not self.motion_pairs:
             self.select_motion_pairs()
 
-        self.base_T_ndi = solve_ax_xb(
-            [pair.a_matrix for pair in self.motion_pairs],
-            [pair.b_matrix for pair in self.motion_pairs],
+        a_values = [
+            as_transform(pair.a_matrix) for pair in self.motion_pairs
+        ]
+        b_values = [
+            as_transform(pair.b_matrix) for pair in self.motion_pairs
+        ]
+
+        rotation_system = np.vstack(
+            [
+                np.kron(np.eye(3), a[:3, :3])
+                - np.kron(b[:3, :3].T, np.eye(3))
+                for a, b in zip(a_values, b_values)
+            ]
         )
-        return self.base_T_ndi.copy()
+        _, singular_values, vt_matrix = np.linalg.svd(rotation_system)
+        raw_rotation = vt_matrix[-1].reshape((3, 3), order="F")
+
+        # The homogeneous solution has arbitrary sign and scale.
+        if np.linalg.det(raw_rotation) < 0:
+            raw_rotation *= -1
+        rotation_x = proper_rotation(raw_rotation)
+
+        translation_system = np.vstack(
+            [a[:3, :3] - np.eye(3) for a in a_values]
+        )
+        translation_rhs = np.concatenate(
+            [
+                rotation_x @ b[:3, 3] - a[:3, 3]
+                for a, b in zip(a_values, b_values)
+            ]
+        )
+
+        if np.linalg.matrix_rank(translation_system) < 3:
+            raise ValueError(
+                "Selected motions do not contain enough translation/rotation "
+                "diversity to determine the calibration."
+            )
+
+        translation_x, _, _, _ = np.linalg.lstsq(
+            translation_system, translation_rhs, rcond=None
+        )
+
+        scale = singular_values[0] if singular_values[0] > 0 else 1.0
+        if singular_values[-2] / scale < 1e-10:
+            raise ValueError(
+                "Selected motions are rotationally degenerate; collect "
+                "rotations about multiple axes."
+            )
+
+        self.ndi_T_base = np.eye(4, dtype=float)
+        self.ndi_T_base[:3, :3] = rotation_x
+        self.ndi_T_base[:3, 3] = translation_x
+        return self.ndi_T_base.copy()
+
+    def ax_xb_errors(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return per-pair AX=XB rotation and translation errors."""
+        if self.ndi_T_base is None:
+            self.solve_ax_xb()
+
+        rotation_errors = []
+        translation_errors = []
+
+        for pair in self.motion_pairs:
+            left = pair.a_matrix @ self.ndi_T_base
+            right = self.ndi_T_base @ pair.b_matrix
+            residual = invert_transform(left) @ right
+
+            rotation_errors.append(
+                rotation_angle_degrees(residual[:3, :3])
+            )
+            translation_errors.append(
+                np.linalg.norm(residual[:3, 3])
+            )
+
+        return (
+            np.asarray(rotation_errors),
+            np.asarray(translation_errors),
+        )
 
     def calculate_metrics(self) -> dict[str, float | int]:
         """Calculate AX=XB and absolute base-to-NDI consistency metrics."""
-        if self.base_T_ndi is None:
-            self.solve_base_to_ndi()
+        if self.ndi_T_base is None:
+            self.solve_ax_xb()
 
-        a_matrices = [pair.a_matrix for pair in self.motion_pairs]
-        b_matrices = [pair.b_matrix for pair in self.motion_pairs]
-        rotation_errors, translation_errors = ax_xb_errors(
-            a_matrices, b_matrices, self.base_T_ndi
-        )
+        rotation_errors, translation_errors = self.ax_xb_errors()
 
         self.metrics = {
             "observation_count": len(self.ndi_transforms),
@@ -330,9 +362,9 @@ class Calibration:
         return self.metrics.copy()
 
     def calibrate(self) -> np.ndarray:
-        """Run the complete workflow and return ``base_T_ndi``."""
+        """Run the complete workflow and return ``ndi_T_base``."""
         self.validate_observations()
         self.select_motion_pairs()
-        self.solve_base_to_ndi()
+        self.solve_ax_xb()
         self.calculate_metrics()
-        return self.base_T_ndi.copy()
+        return self.ndi_T_base.copy()
