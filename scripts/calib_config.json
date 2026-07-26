@@ -12,14 +12,14 @@
     "tool_id": 1
   },
   "matching": {
-    "time_tolerance": "10ms"
+    "time_tolerance": "15ms"
   },
   "calibration": {
     "min_rotation_deg": 5.0,
     "min_translation": 0.005,
     "min_index_separation": 2,
     "max_rotation_disagreement_deg": 2.0,
-    "max_pairs": 200
+    "max_pairs": 500
   },
   "output": {
     "result_file": null

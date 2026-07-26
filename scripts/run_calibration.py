@@ -52,9 +52,7 @@ def main() -> None:
         toolkey=ndi_config["tool_id"],
     )
 
-    # NDI is the slower stream, so preserve one row per NDI observation and
-    # attach the nearest SI observation. This avoids reusing an NDI transform
-    # for several higher-frequency SI rows.
+    # NDI is the slower stream, so we match nearest SI to NDI observation
     matched_data, _, matched_count, dropped_count = match(
         ndi_data,
         si_data,
@@ -71,6 +69,7 @@ def main() -> None:
             "Fewer than three timestamp matches remain after filtering."
         )
 
+    # initialize this calibration object
     calibration = Calibration(
         ndi_transforms=matched_data["NDI Transform"],
         si_transforms=matched_data["SI Transform"],
