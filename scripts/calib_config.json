@@ -1,11 +1,16 @@
 {
   "inputs": {
-    "si_csv": "C:\\Users\\Tracy\\Documents\\2026 RCL UBC\\20260723_NDI_data\\data_local_part_1_23_7_2026_14_39_48.csv",
-    "ndi_csv": "C:\\Users\\Tracy\\Documents\\2026 RCL UBC\\20260723_NDI_data\\ParticipantData23-07-2026_14-39-33.csv"
+    "si_csv": "./data/20260723_NDI_data/data_local_part_1_23_7_2026_14_35_38.csv",
+    "ndi_csv": "./data/20260723_NDI_data/ParticipantData23-07-2026_14-35-22.csv",
+    "si_robot_params": "./data/si_robot/hand_eye_0612_python.npz"
   },
-  "si": {
+  "si_arm": {
     "timestamp_column": "Time_stamp",
     "arm_column": "mip Index (PSM1)"
+  },
+  "si_ecm":{
+    "timestamp_column": "Time_stamp",
+    "ecm_column": "mip Index (ECM)"
   },
   "ndi": {
     "timestamp_column": "Timestamp",
@@ -22,6 +27,18 @@
     "max_pairs": 500
   },
   "output": {
-    "result_file": null
+    "calib_file": "./data/20260723_NDI_data/calib.npz",
+    "match_output": "./data/20260723_NDI_data/matched_output.csv"
+  },
+  "video":{
+    "input": "./data/20260723_NDI_data/video_stream_1_20260723_143603.mp4",
+    "timestamp": "./data/20260723_NDI_data/video_stream_1_20260723_143603_timestamps.txt",
+    "output": "./data/20260723_NDI_data/video_stream_1_20260723_143603_ndi_overlay.mp4",
+    "time_tolerance": "30ms",
+    "marker_radius": 10
+  },
+  "camera": {
+    "parameters_file": "./data/si_robot/camera_intrinsics.npz"
   }
+
 }

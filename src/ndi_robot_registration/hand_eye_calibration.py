@@ -48,10 +48,6 @@ class Calibration:
     ``(Q_j inverse(Q_i)) X = X (P_j inverse(P_i))``.
 
     Thus the attachment ``C`` does not need to be known or estimated.
-
-    SI and NDI Series must be row-aligned. NDI translations are assumed to be
-    millimetres by default and are converted to metres with
-    ``ndi_translation_scale=0.001``.
     """
 
     def __init__(
@@ -60,10 +56,10 @@ class Calibration:
         si_transforms: pd.Series,
         *, # everything after this must be named
         min_rotation_deg: float = 5.0,
-        min_translation: float = 0.005,
+        min_translation: float = 0.01,
         min_index_separation: int = 1,
         max_rotation_disagreement_deg: float = 2.0,
-        max_pairs: int | None = 500,
+        max_pairs: int | None = 500, #default when omitted is 500
     ) -> None:
         if not isinstance(ndi_transforms, pd.Series):
             raise TypeError("ndi_transforms must be a pandas Series.")
@@ -93,6 +89,7 @@ class Calibration:
         self.valid_indices: list[int] = []
         self.invalid_indices: list[int] = []
         self.motion_pairs: list[MotionPair] = []
+        self.pair_selection_progress: tuple[int, int] = (0, 0)
         self.ndi_T_base: np.ndarray | None = None
         self.metrics: dict[str, float | int] = {}
 
@@ -131,124 +128,87 @@ class Calibration:
         return self.valid_indices.copy()
 
     def select_motion_pairs(self) -> list[MotionPair]:
-        """Select valid pairs in which rotation and translation both changed."""
+        """
+        Select sequential, sufficiently separated, informative motion pairs.
+
+        Start with the first valid observation as the anchor. Test candidates
+        beginning ``min_index_separation`` positions later. If a candidate
+        fails the motion thresholds, test the next valid observation against
+        the same anchor. When a pair is accepted, its second observation
+        becomes the next anchor.
+        """
         if not self.valid_indices:
             self.validate_observations()
 
-        # Do not materialize every possible pair. For n observations that
-        # would require n(n-1)/2 matrices. Instead, sample observations evenly
-        # across the recording, expanding the sample only if the filters leave
-        # too few pairs.
         observation_count = len(self.valid_indices)
-        if self.max_pairs is None:
-            sample_sizes = [observation_count]
-        else:
-            initial_size = max(
-                10,
-                int(np.ceil(np.sqrt(2 * self.max_pairs))) + 1,
-            )
-            maximum_size = min(
-                observation_count,
-                max(initial_size, 4 * initial_size),
-            )
-            sample_sizes = []
-            sample_size = min(observation_count, initial_size)
-            while True:
-                sample_sizes.append(sample_size)
-                if sample_size >= maximum_size:
-                    break
-                sample_size = min(maximum_size, sample_size * 2)
+        self.motion_pairs = []
 
-        candidates: list[tuple[float, MotionPair]] = []
-        for sample_size in sample_sizes:
-            sample_positions = np.linspace(
-                0,
-                observation_count - 1,
-                num=sample_size,
-                dtype=int,
-            )
-            sampled_indices = [
-                self.valid_indices[position]
-                for position in np.unique(sample_positions)
-            ]
-            candidates = []
+        anchor_position = 0
+        candidate_position = anchor_position + self.min_index_separation
+        last_examined_position = anchor_position
 
-            for position, index_i in enumerate(sampled_indices):
-                for index_j in sampled_indices[position + 1:]:
-                    if index_j - index_i < self.min_index_separation:
-                        continue
-
-                    si_i = self._valid_si[index_i]
-                    si_j = self._valid_si[index_j]
-                    ndi_i = self._valid_ndi[index_i]
-                    ndi_j = self._valid_ndi[index_j]
-
-                    # Check changes between the absolute observations before
-                    # constructing A and B.
-                    si_relative_rotation = (
-                        si_j[:3, :3] @ si_i[:3, :3].T
-                    )
-                    ndi_relative_rotation = (
-                        ndi_j[:3, :3] @ ndi_i[:3, :3].T
-                    )
-                    si_rotation = rotation_angle_degrees(
-                        si_relative_rotation
-                    )
-                    ndi_rotation = rotation_angle_degrees(
-                        ndi_relative_rotation
-                    )
-                    si_translation = float(
-                        np.linalg.norm(si_j[:3, 3] - si_i[:3, 3])
-                    )
-                    ndi_translation = float(
-                        np.linalg.norm(ndi_j[:3, 3] - ndi_i[:3, 3])
-                    )
-
-                    if (
-                        si_rotation < self.min_rotation_deg
-                        or ndi_rotation < self.min_rotation_deg
-                        or si_translation < self.min_translation
-                        or ndi_translation < self.min_translation
-                    ):
-                        continue
-
-                    # Rotation-disagreement filtering is temporarily disabled.
-                    # if (
-                    #     abs(si_rotation - ndi_rotation)
-                    #     > self.max_rotation_disagreement_deg
-                    # ):
-                    #     continue
-
-                    # A X = X B with X = ndi_T_base.
-                    a_matrix = ndi_j @ invert_transform(ndi_i)
-                    b_matrix = si_j @ invert_transform(si_i)
-
-                    pair = MotionPair(
-                        index_i=index_i,
-                        index_j=index_j,
-                        a_matrix=a_matrix,
-                        b_matrix=b_matrix,
-                        si_rotation_deg=si_rotation,
-                        ndi_rotation_deg=ndi_rotation,
-                        si_translation=si_translation,
-                        ndi_translation=ndi_translation,
-                    )
-                    score = min(si_rotation, ndi_rotation) + 100.0 * min(
-                        si_translation, ndi_translation
-                    )
-                    candidates.append((score, pair))
-
+        while candidate_position < observation_count:
             if (
-                self.max_pairs is None
-                or len(candidates) >= self.max_pairs
-                or sample_size == sample_sizes[-1]
+                self.max_pairs is not None
+                and len(self.motion_pairs) >= self.max_pairs
             ):
                 break
 
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        if self.max_pairs is not None:
-            candidates = candidates[:self.max_pairs]
-        self.motion_pairs = [pair for _, pair in candidates]
+            last_examined_position = candidate_position
+            index_i = self.valid_indices[anchor_position]
+            index_j = self.valid_indices[candidate_position]
+
+            si_i = self._valid_si[index_i]
+            si_j = self._valid_si[index_j]
+            ndi_i = self._valid_ndi[index_i]
+            ndi_j = self._valid_ndi[index_j]
+
+            si_relative_rotation = si_j[:3, :3] @ si_i[:3, :3].T
+            ndi_relative_rotation = ndi_j[:3, :3] @ ndi_i[:3, :3].T
+            si_rotation = rotation_angle_degrees(si_relative_rotation)
+            ndi_rotation = rotation_angle_degrees(ndi_relative_rotation)
+            si_translation = float(
+                np.linalg.norm(si_j[:3, 3] - si_i[:3, 3])
+            )
+            ndi_translation = float(
+                np.linalg.norm(ndi_j[:3, 3] - ndi_i[:3, 3])
+            )
+
+            motion_is_valid = (
+                si_rotation >= self.min_rotation_deg
+                and ndi_rotation >= self.min_rotation_deg
+                and si_translation >= self.min_translation
+                and ndi_translation >= self.min_translation
+            )
+
+            if not motion_is_valid:
+                candidate_position += 1
+                continue
+
+            self.motion_pairs.append(
+                MotionPair(
+                    index_i=index_i,
+                    index_j=index_j,
+                    a_matrix=ndi_j @ invert_transform(ndi_i),
+                    b_matrix=si_j @ invert_transform(si_i),
+                    si_rotation_deg=si_rotation,
+                    ndi_rotation_deg=ndi_rotation,
+                    si_translation=si_translation,
+                    ndi_translation=ndi_translation,
+                )
+            )
+
+            anchor_position = candidate_position
+            candidate_position = (
+                anchor_position + self.min_index_separation
+            )
+
+        reached_count = min(last_examined_position + 1, observation_count)
+        self.pair_selection_progress = (reached_count, observation_count)
+        print(
+            "Motion pair selection reached valid index "
+            f"{reached_count}/{observation_count}."
+        )
 
         if len(self.motion_pairs) < 3:
             raise ValueError(
@@ -365,6 +325,6 @@ class Calibration:
         """Run the complete workflow and return ``ndi_T_base``."""
         self.validate_observations()
         self.select_motion_pairs()
-        self.solve_ax_xb()
+        ndi_T_base = self.solve_ax_xb()
         self.calculate_metrics()
-        return self.ndi_T_base.copy()
+        return ndi_T_base

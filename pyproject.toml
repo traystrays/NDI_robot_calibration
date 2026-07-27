@@ -10,10 +10,9 @@
   requires-python = ">=3.12"
   dependencies = [
       "numpy",
+      "opencv-python",
       "pandas",
   ]
 
   [tool.setuptools.packages.find]
   where = ["src"]
-
-  

@@ -8,7 +8,7 @@ import numpy as np
 from ndi_robot_registration.clean_ndi_data import clean_ndi_data
 from ndi_robot_registration.clean_si_data import clean_si_data
 from ndi_robot_registration.hand_eye_calibration import Calibration
-from ndi_robot_registration.match import match
+from ndi_robot_registration.match import match, match_video
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,15 +31,17 @@ def project_path(path_value: str) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def main() -> None:
-    """Clean, match, calibrate, and report the base-to-NDI transform."""
+def main() :
+    """Clean, match video frames, calibrate, and save the results."""
     print(CONFIG_PATH)
     config = load_config()
     inputs = config["inputs"]
-    si_config = config["si"]
+    si_config = config["si_arm"]
     ndi_config = config["ndi"]
     matching_config = config["matching"]
     calibration_config = config["calibration"]
+    video_config = config["video"]
+    output_config = config.get("output", {})
 
     si_data = clean_si_data(
         project_path(inputs["si_csv"]),
@@ -69,6 +71,25 @@ def main() -> None:
             "Fewer than three timestamp matches remain after filtering."
         )
 
+    video_matched_data = match_video(
+        matched_data,
+        project_path(video_config["timestamp"]),
+        tolerance=video_config.get(
+            "time_tolerance",
+            matching_config["time_tolerance"],
+        ),
+    )
+    matched_frame_count = int(
+        video_matched_data["matched_timestamp"].notna().sum()
+    )
+
+    match_output_value = output_config.get("match_output")
+    if match_output_value is not None:
+        match_output_path = project_path(match_output_value)
+        match_output_path.parent.mkdir(parents=True, exist_ok=True)
+        video_matched_data.to_csv(match_output_path, index=False)
+        print(f"Saved video-frame matches to: {match_output_path}")
+
     # initialize this calibration object
     calibration = Calibration(
         ndi_transforms=matched_data["NDI Transform"],
@@ -86,6 +107,10 @@ def main() -> None:
     np.set_printoptions(precision=8, suppress=True)
     print(f"Matched observations: {matched_count}")
     print(f"Unmatched observations removed: {dropped_count}")
+    print(
+        "Video frames matched to NDI/SI observations: "
+        f"{matched_frame_count}/{len(video_matched_data)}"
+    )
     print(f"Accepted motion pairs: {len(calibration.motion_pairs)}")
     print("\nndi_T_base:")
     print(ndi_T_base)
@@ -93,7 +118,8 @@ def main() -> None:
     for name, value in calibration.metrics.items():
         print(f"  {name}: {value}")
 
-    output_value = config.get("output", {}).get("result_file")
+
+    output_value = output_config.get("calib_file")
     if output_value is not None:
         output_path = project_path(output_value)
         output_path.parent.mkdir(parents=True, exist_ok=True)
