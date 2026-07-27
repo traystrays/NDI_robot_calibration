@@ -24,7 +24,7 @@
     "min_translation": 0.005,
     "min_index_separation": 2,
     "max_rotation_disagreement_deg": 2.0,
-    "max_pairs": 500
+    "max_pairs": 600
   },
   "output": {
     "calib_file": "./data/20260723_NDI_data/calib.npz",
