@@ -1,0 +1,7 @@
+Video: 1920x1080, 30.000 FPS, 3258 frames
+Saved reprojected video to: C:\Users\Tracy\Projects\NDI_robot_calibration\data\20260727_data\video_stream_1_20260727_111356_OVERLAY.mp4
+  processed_frames: 3258
+  projected_frames: 790
+  unmatched_frames: 2468
+  behind_camera_frames: 0
+  outside_image_frames: 0

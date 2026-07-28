@@ -218,6 +218,53 @@ class Calibration:
 
         return self.motion_pairs.copy()
 
+    def use_selected_observations(self) -> list[MotionPair]:
+        """Create motion pairs directly from consecutive selected observations.
+
+        This intentionally does not apply the automatic motion thresholds:
+        the caller's hand-picked observations are authoritative.
+        """
+        if not self.valid_indices:
+            self.validate_observations()
+
+        self.motion_pairs = []
+        for index_i, index_j in zip(
+            self.valid_indices[:-1], self.valid_indices[1:]
+        ):
+            si_i = self._valid_si[index_i]
+            si_j = self._valid_si[index_j]
+            ndi_i = self._valid_ndi[index_i]
+            ndi_j = self._valid_ndi[index_j]
+            self.motion_pairs.append(
+                MotionPair(
+                    index_i=index_i,
+                    index_j=index_j,
+                    a_matrix=ndi_j @ invert_transform(ndi_i),
+                    b_matrix=si_j @ invert_transform(si_i),
+                    si_rotation_deg=rotation_angle_degrees(
+                        si_j[:3, :3] @ si_i[:3, :3].T
+                    ),
+                    ndi_rotation_deg=rotation_angle_degrees(
+                        ndi_j[:3, :3] @ ndi_i[:3, :3].T
+                    ),
+                    si_translation=float(
+                        np.linalg.norm(si_j[:3, 3] - si_i[:3, 3])
+                    ),
+                    ndi_translation=float(
+                        np.linalg.norm(ndi_j[:3, 3] - ndi_i[:3, 3])
+                    ),
+                )
+            )
+
+        if len(self.motion_pairs) < 3:
+            raise ValueError(
+                "At least four valid selected observations are required."
+            )
+        self.pair_selection_progress = (
+            len(self.valid_indices), len(self.valid_indices)
+        )
+        return self.motion_pairs.copy()
+
     def solve_ax_xb(self) -> np.ndarray:
         """Solve ``A X = X B`` and store ``X`` as ``ndi_T_base``."""
         if not self.motion_pairs:
@@ -325,6 +372,14 @@ class Calibration:
         """Run the complete workflow and return ``ndi_T_base``."""
         self.validate_observations()
         self.select_motion_pairs()
+        ndi_T_base = self.solve_ax_xb()
+        self.calculate_metrics()
+        return ndi_T_base
+
+    def calibrate_selected(self) -> np.ndarray:
+        """Calibrate using every hand-selected observation as supplied."""
+        self.validate_observations()
+        self.use_selected_observations()
         ndi_T_base = self.solve_ax_xb()
         self.calculate_metrics()
         return ndi_T_base

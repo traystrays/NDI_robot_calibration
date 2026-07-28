@@ -90,10 +90,33 @@ def main() :
         video_matched_data.to_csv(match_output_path, index=False)
         print(f"Saved video-frame matches to: {match_output_path}")
 
-    # initialize this calibration object
+    hand_pick_frame = calibration_config.get("hand-pick-frame", False)
+    if not isinstance(hand_pick_frame, bool):
+        raise TypeError(
+            "calibration.hand-pick-frame must be true or false."
+        )
+
+    # Frame selection happens only after NDI, SI, and video are synchronized.
+    if hand_pick_frame:
+        from ndi_robot_registration.frame_selection import (
+            select_calibration_frames,
+        )
+
+        calibration_data = select_calibration_frames(
+            project_path(video_config["input"]),
+            video_matched_data,
+            selection_path=(
+                project_path(output_config["selected_frames"])
+                if output_config.get("selected_frames") is not None
+                else None
+            ),
+        )
+    else:
+        calibration_data = matched_data
+
     calibration = Calibration(
-        ndi_transforms=matched_data["NDI Transform"],
-        si_transforms=matched_data["SI Transform"],
+        ndi_transforms=calibration_data["NDI Transform"],
+        si_transforms=calibration_data["SI Transform"],
         min_rotation_deg=calibration_config["min_rotation_deg"],
         min_translation=calibration_config["min_translation"],
         min_index_separation=calibration_config["min_index_separation"],
@@ -102,7 +125,11 @@ def main() :
         ],
         max_pairs=calibration_config["max_pairs"],
     )
-    ndi_T_base = calibration.calibrate()
+    ndi_T_base = (
+        calibration.calibrate_selected()
+        if hand_pick_frame
+        else calibration.calibrate()
+    )
 
     np.set_printoptions(precision=8, suppress=True)
     print(f"Matched observations: {matched_count}")
@@ -112,6 +139,8 @@ def main() :
         f"{matched_frame_count}/{len(video_matched_data)}"
     )
     print(f"Accepted motion pairs: {len(calibration.motion_pairs)}")
+    if hand_pick_frame:
+        print(f"Hand-selected calibration frames: {len(calibration_data)}")
     print("\nndi_T_base:")
     print(ndi_T_base)
     print("\nCalibration metrics:")
