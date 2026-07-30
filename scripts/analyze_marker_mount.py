@@ -111,6 +111,33 @@ def analyze_marker_mounts(
     return center_transform, translation_errors, rotation_errors
 
 
+def calculate_marker_prediction_errors(
+    matched_data: pd.DataFrame,
+    valid_indices: list[int],
+    ndi_T_base: np.ndarray,
+    end_effector_T_marker: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compare ``X P_i C`` against each measured ``ndi_T_marker_i``."""
+    translation_errors = []
+    rotation_errors = []
+    for index in valid_indices:
+        measured = as_transform(matched_data.iloc[index]["NDI Transform"])
+        base_T_end_effector = as_transform(
+            matched_data.iloc[index]["SI Transform"]
+        )
+        predicted = (
+            ndi_T_base
+            @ base_T_end_effector
+            @ end_effector_T_marker
+        )
+        residual = invert_transform(predicted) @ measured
+        translation_errors.append(np.linalg.norm(residual[:3, 3]))
+        rotation_errors.append(
+            rotation_angle_degrees(residual[:3, :3])
+        )
+    return np.asarray(translation_errors), np.asarray(rotation_errors)
+
+
 def print_error_summary(
     name: str,
     errors: np.ndarray,
@@ -184,7 +211,20 @@ def main() -> None:
         ],
         max_pairs=calibration_config["max_pairs"],
     )
-    ndi_T_base = calibration.calibrate()
+    output_config = config.get("output", {})
+    calibration_path_value = output_config.get("calib_file")
+    calibration_path = (
+        project_path(calibration_path_value)
+        if calibration_path_value is not None
+        else None
+    )
+    if calibration_path is not None and calibration_path.is_file():
+        with np.load(calibration_path, allow_pickle=False) as calibration_file:
+            ndi_T_base = as_transform(calibration_file["ndi_T_base"])
+        calibration.validate_observations()
+        print(f"Using saved ndi_T_base from: {calibration_path}")
+    else:
+        ndi_T_base = calibration.calibrate()
 
     marker_mounts = calculate_marker_mounts(
         matched_data,
@@ -196,6 +236,15 @@ def main() -> None:
         translation_errors_m,
         rotation_errors_deg,
     ) = analyze_marker_mounts(marker_mounts)
+    (
+        prediction_translation_errors_m,
+        prediction_rotation_errors_deg,
+    ) = calculate_marker_prediction_errors(
+        matched_data,
+        calibration.valid_indices,
+        ndi_T_base,
+        center_mount,
+    )
 
     print(f"\nMatched observations: {matched_count}")
     print(f"Dropped timestamp matches: {dropped_count}")
@@ -213,6 +262,37 @@ def main() -> None:
         rotation_errors_deg,
         "deg",
     )
+    print_error_summary(
+        "Predicted-vs-measured NDI marker translation error",
+        prediction_translation_errors_m * 1000.0,
+        "mm",
+    )
+    print_error_summary(
+        "Predicted-vs-measured NDI marker rotation error",
+        prediction_rotation_errors_deg,
+        "deg",
+    )
+
+    marker_mount_value = output_config.get("marker_mount_file")
+    marker_mount_path = (
+        project_path(marker_mount_value)
+        if marker_mount_value is not None
+        else (
+            calibration_path.with_name("marker_mount.npz")
+            if calibration_path is not None
+            else PROJECT_ROOT / "marker_mount.npz"
+        )
+    )
+    marker_mount_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        marker_mount_path,
+        gripper_T_marker=center_mount,
+        end_effector_T_marker=center_mount,
+        translation_errors_mm=prediction_translation_errors_m * 1000.0,
+        rotation_errors_deg=prediction_rotation_errors_deg,
+        valid_indices=np.asarray(calibration.valid_indices, dtype=int),
+    )
+    print(f"\nSaved gripper_T_marker and errors to: {marker_mount_path}")
 
     if arguments.output is not None:
         output_path = (
@@ -228,6 +308,10 @@ def main() -> None:
                 "timestamp": valid_rows["timestamp"].to_numpy(),
                 "translation_error_mm": translation_errors_m * 1000.0,
                 "rotation_error_deg": rotation_errors_deg,
+                "prediction_translation_error_mm":
+                    prediction_translation_errors_m * 1000.0,
+                "prediction_rotation_error_deg":
+                    prediction_rotation_errors_deg,
             }
         )
         diagnostics.to_csv(output_path, index=False)
