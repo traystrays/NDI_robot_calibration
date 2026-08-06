@@ -42,7 +42,7 @@ def load_npz_transform(file_path: Path, key: str) -> np.ndarray:
     if not file_path.is_file():
         raise FileNotFoundError(f"Parameter file not found: {file_path}")
 
-    with np.load(file_path, allow_pickle=False) as parameters:
+    with np.load(file_path, allow_pickle=False) as parameters: #allow pickle -> save as bytes
         if key not in parameters:
             raise KeyError(
                 f"{file_path} does not contain {key!r}. "
@@ -86,9 +86,7 @@ def load_camera_parameters(
                 f"{parameters.files}"
             )
 
-        camera_matrix = np.asarray(
-            parameters[intrinsic_key], dtype=float
-        ).copy()
+        camera_matrix = np.asarray(parameters[intrinsic_key], dtype=float).copy()
         if camera_matrix.shape != (3, 3):
             raise ValueError(
                 f"Camera matrix must be 3x3; got {camera_matrix.shape}."
@@ -133,7 +131,8 @@ def NDI_in_cam(
         @ as_transform(ecm_T_cam)
     )
     cam_T_ndi = invert_transform(ndi_T_cam)
-    return cam_T_ndi @ as_transform(ndi_transform)
+    cam_T_marker = cam_T_ndi @ as_transform(ndi_transform)
+    return cam_T_marker
 
 
 def project_camera_position(
@@ -141,7 +140,10 @@ def project_camera_position(
     camera_matrix: np.ndarray,
     distortion: np.ndarray,
 ) -> tuple[float, float] | None:
-    """Project a camera-frame 3D position into distorted pixel coordinates."""
+    """
+    Project a camera-frame 3D position into distorted pixel coordinates.
+    Turn 3D coordinates into 2D pixel coordinates.
+    """
     position = np.asarray(camera_position, dtype=float).reshape(3)
     if not np.isfinite(position).all() or position[2] <= 0:
         return None
@@ -183,20 +185,23 @@ def get_video_properties(
 def prepare_frame_poses(
     config: dict[str, Any],
 ) -> pd.DataFrame:
-    """Match NDI marker and time-varying ECM poses to every video frame."""
-    inputs = config["inputs"]
+    """
+    Match NDI marker and time-varying ECM poses to every video frame.
+    Using the reprojection configuration.
+    """
+    reprojection = config["reprojection"]
     ndi_config = config["ndi"]
     ecm_config = config["si_ecm"]
     matching_config = config["matching"]
     video_config = config["video"]
 
     ndi_data = clean_ndi_data(
-        project_path(inputs["ndi_csv"]),
+        project_path(reprojection["ndi_csv"]),
         timestamp_column=ndi_config["timestamp_column"],
         toolkey=ndi_config["tool_id"],
     )
     ecm_data = clean_si_data(
-        project_path(inputs["si_csv"]),
+        project_path(reprojection["si_csv"]),
         timestamp_column=ecm_config["timestamp_column"],
         arm_column=ecm_config["ecm_column"],
     )
@@ -216,8 +221,8 @@ def prepare_frame_poses(
     ]
     return match_video(
         matched_data,
-        project_path(video_config["timestamp"]),
-        tolerance=video_config.get(
+        project_path(reprojection["timestamp"]),
+        tolerance=reprojection.get(
             "time_tolerance",
             matching_config["time_tolerance"],
         ),
@@ -279,8 +284,8 @@ def write_reprojected_video(
             ecm_transform = row["ECM Transform"]
 
             if not (
-                isinstance(ndi_transform, np.ndarray)
-                and isinstance(ecm_transform, np.ndarray)
+                isinstance(ndi_transform, np.ndarray) # must be a np.ndarray
+                and isinstance(ecm_transform, np.ndarray) # must be a np.ndarray
                 and is_valid_transform(
                     ndi_transform,
                     rotation_atol=2e-5,
@@ -312,6 +317,7 @@ def write_reprojected_video(
                 behind_camera_count += 1
             else:
                 pixel_x, pixel_y = pixel
+                # check it is within bounds of the image
                 if 0 <= pixel_x < width and 0 <= pixel_y < height:
                     center = (int(round(pixel_x)), int(round(pixel_y)))
                     cv2.circle(
@@ -363,15 +369,15 @@ def main() -> None:
     """Load parameters, match poses to frames, and create the overlay video."""
     config = load_config()
     inputs = config["inputs"]
+    reprojection = config["reprojection"]
     output_config = config["output"]
-    video_config = config["video"]
     camera_config = config["camera"]
 
     calibration_path = project_path(output_config["calib_file"])
     si_robot_parameter_path = project_path(inputs["si_robot_params"])
     camera_parameter_path = project_path(camera_config["parameters_file"])
-    video_path = project_path(video_config["input"])
-    output_path = project_path(video_config["output"])
+    video_path = project_path(reprojection["video_input"])
+    output_path = project_path(reprojection["output"])
 
     ndi_T_base = load_npz_transform(calibration_path, "ndi_T_base")
     ecm_T_cam = load_npz_transform(si_robot_parameter_path, "X")
@@ -394,7 +400,7 @@ def main() -> None:
         ecm_T_cam,
         camera_matrix,
         distortion,
-        marker_radius=int(video_config.get("marker_radius", 10)),
+        marker_radius=int(reprojection.get("marker_radius", 10)),
     )
 
     print(f"Saved reprojected video to: {output_path}")

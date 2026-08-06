@@ -1,8 +1,23 @@
 {
   "inputs": {
-    "si_csv": "./data/20260728_data/data_local_part_1_28_7_2026_15_11_45.csv",
-    "ndi_csv": "./data/20260728_data/ParticipantData28-07-2026_15-11-09.csv",
+    "si_csv": "./data/20260804_data_gripper/data_local_part_1_4_8_2026_14_12_5.csv",
+    "ndi_csv": "./data/20260804_data_gripper/ParticipantData04-08-2026_14-11-52.csv",
     "si_robot_params": "./data/si_robot/hand_eye_0727_python.npz"
+  },
+  "video":{
+    "input": "./data/20260804_data_gripper/video_stream_1_20260804_141131.mp4",
+    "timestamp": "./data/20260804_data_gripper/video_stream_1_20260804_141131_timestamps.txt",
+    "time_tolerance": "30ms",
+    "marker_radius": 10
+  },
+  "reprojection": {
+    "si_csv": "./data/20260804_test_data/data_local_part_1_4_8_2026_14_36_44.csv",
+    "ndi_csv": "./data/20260804_test_data/ParticipantData04-08-2026_14-35-42.csv",
+    "video_input": "./data/20260804_test_data/video_stream_1_20260804_143625.mp4",
+    "timestamp": "./data/20260804_test_data/video_stream_1_20260804_143625_timestamps.txt",
+    "output": "./data/20260804_test_data/reprojection_video_gripper.mp4",
+    "time_tolerance": "30ms",
+    "marker_radius": 10
   },
   "si_arm": {
     "timestamp_column": "Time_stamp",
@@ -17,29 +32,22 @@
     "tool_id": 1
   },
   "matching": {
-    "time_tolerance": "15ms"
+    "time_tolerance": "30ms"
   },
   "calibration": {
-    "hand-pick-frame": true,
+    "hand-pick-frame": false,
     "min_rotation_deg": 5.0,
-    "min_translation": 0.01,
+    "min_translation": 0.05,
     "min_index_separation": 25,
-    "max_rotation_disagreement_deg": 2.0,
+    "max_rotation_disagreement_deg": 5.0,
     "max_pairs": 600
   },
   "output": {
-    "calib_file": "./data/20260728_data/calib.npz",
-    "marker_mount_file": "./data/20260728_data/marker_mount.npz",
-    "marker_error_output": "./data/20260728_data/marker_prediction_errors.csv",
-    "match_output": "./data/20260728_data/matched_output.csv",
-    "selected_frames": "./data/20260728_data/selected_calibration_frames.csv"
-  },
-  "video":{
-    "input": "./data/20260728_data/video_stream_1_20260728_151116.mp4",
-    "timestamp": "./data/20260728_data/video_stream_1_20260728_151116_timestamps.txt",
-    "output": "./data/20260728_data/video_stream_1_20260728_151116_OVERLAY_1.mp4",
-    "time_tolerance": "30ms",
-    "marker_radius": 10
+    "calib_file": "./data/20260804_data_cannula/calib.npz",
+    "marker_mount_file": "./data/20260804_data_cannula/marker_mount.npz",
+    "marker_error_output": "./data/20260804_data_cannula/marker_prediction_errors.csv",
+    "match_output": "./data/20260804_data_cannula/matched_output.csv",
+    "selected_frames": "./data/20260804_data_cannula/selected_calibration_frames.csv"
   },
   "camera": {
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"
