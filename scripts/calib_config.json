@@ -52,6 +52,15 @@
   "camera": {
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"
   },
+  "plane": {
+    "size": [50.0, 50.0, 0.0],
+    "offset": [0.0, 0.0, 0.0],
+    "units": "mm",
+    "centered": true,
+    "image": null,
+    "opacity": 0.75,
+    "output": "./data/20260804_test_data/plane_overlay.mp4"
+  },
   "ndi_marker":{
     "units":"mm",
     "translation": [-11.4, 0.0, 10.0]
