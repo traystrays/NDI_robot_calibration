@@ -1,14 +1,17 @@
 """Example config-driven workflow for NDI-to-robot calibration."""
 
 import json
+from os import remove
 from pathlib import Path
+import pandas as pd
 
 import numpy as np
 
 from ndi_robot_registration.clean_ndi_data import clean_ndi_data
-from ndi_robot_registration.clean_si_data import clean_si_data
+from ndi_robot_registration.clean_si_data import clean_si_data, apply_transform
 from ndi_robot_registration.hand_eye_calibration import Calibration
 from ndi_robot_registration.match import match, match_video
+from ndi_robot_registration.transforms import invert_transform, average_transforms
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +33,35 @@ def project_path(path_value: str) -> Path:
     path = Path(path_value)
     return path if path.is_absolute() else PROJECT_ROOT / path
 
+def calculate_error(ndi_T_base: np.ndarray, ndi_data: np.ndarray, robot_data: np.ndarray):
+    """
+    NDI marker position in NDI coordinate frame (ndi_data) is treated as ground truth.
+    """
+
+    ndi_T_robot_marker = ndi_T_base @ robot_data
+    residual = invert_transform(ndi_T_robot_marker) @ ndi_data
+    return residual
+
+def calculate_df_errors(ndi_T_base: np.ndarray, matched_data: pd.DataFrame):
+    """
+    Return average error between ndi marker and ndi marker held by SI robot, calculated
+    """
+    matched_data["Residual"] = None  # Initialize the new column
+
+    residual_list = []
+    for idx, row in matched_data.iterrows():
+        ndi_data = row["NDI Transform"]
+        robot_data = row["SI with marker Transform"]
+        residual = calculate_error(ndi_T_base, ndi_data, robot_data)
+        matched_data.at[idx, "Residual"] = residual
+        residual_list.append(residual)
+
+    average_residual = average_transforms(residual_list)
+    return matched_data, average_residual
+    
+    
+
+    
 
 def main() :
     """Clean, match video frames, calibrate, and save the results."""
@@ -40,8 +72,9 @@ def main() :
     ndi_config = config["ndi"]
     matching_config = config["matching"]
     calibration_config = config["calibration"]
-    video_config = config["video"]
+    video_config = config["video"] # needed key
     output_config = config.get("output", {})
+    ndi_marker = config.get("ndi_marker", {}) # key may not be present
 
     si_data = clean_si_data(
         project_path(inputs["si_csv"]),
@@ -79,6 +112,24 @@ def main() :
             matching_config["time_tolerance"],
         ),
     )
+
+    for idx, row in video_matched_data.iterrows():
+
+        if video_matched_data["NDI Transform"].isna().any() or video_matched_data["SI Transform"].isna().any():
+            video_matched_data.drop(idx, inplace=True)
+
+
+    ndi_translation = ndi_marker.get("translation")
+
+    if ndi_marker.get("units") == "mm":
+        ndi_translation = np.array(ndi_translation) / 1000.0  # Convert mm to meters
+    ndi_transform = np.eye(4)
+    ndi_transform[:3,3] = ndi_translation
+    print(ndi_transform)
+
+    apply_transform(video_matched_data, "SI Transform", "SI with marker Transform", ndi_transform)
+
+
     matched_frame_count = int(
         video_matched_data["matched_timestamp"].notna().sum()
     )
@@ -131,7 +182,14 @@ def main() :
         else calibration.calibrate()
     )
 
+    video_matched_data, errors = calculate_df_errors(
+        ndi_T_base, video_matched_data
+    )
+
+    
     np.set_printoptions(precision=8, suppress=True)
+    print(f"Average residual error:")
+    print(errors)
     print(f"Matched observations: {matched_count}")
     print(f"Unmatched observations removed: {dropped_count}")
     print(

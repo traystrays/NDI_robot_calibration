@@ -174,11 +174,14 @@ class Calibration:
                 np.linalg.norm(ndi_j[:3, 3] - ndi_i[:3, 3])
             )
 
+            rotation_disagreement = abs(si_rotation - ndi_rotation)
+
             motion_is_valid = (
                 si_rotation >= self.min_rotation_deg
                 and ndi_rotation >= self.min_rotation_deg
                 and si_translation >= self.min_translation
                 and ndi_translation >= self.min_translation
+                and rotation_disagreement <= self.max_rotation_disagreement_deg
             )
 
             if not motion_is_valid:

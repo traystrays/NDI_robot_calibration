@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "si_csv": "./data/20260804_data_gripper/data_local_part_1_4_8_2026_14_12_5.csv",
-    "ndi_csv": "./data/20260804_data_gripper/ParticipantData04-08-2026_14-11-52.csv",
+    "si_csv": "./data/20260804_data_cannula/data_local_part_1_4_8_2026_13_22_4.csv",
+    "ndi_csv": "./data/20260804_data_cannula/ParticipantData04-08-2026_13-21-21.csv",
     "si_robot_params": "./data/si_robot/hand_eye_0727_python.npz"
   },
   "video":{
-    "input": "./data/20260804_data_gripper/video_stream_1_20260804_141131.mp4",
-    "timestamp": "./data/20260804_data_gripper/video_stream_1_20260804_141131_timestamps.txt",
+    "input": "./data/20260804_data_cannula/video_stream_1_20260804_132146.mp4",
+    "timestamp": "./data/20260804_data_cannula/video_stream_1_20260804_132146_timestamps.txt",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -15,7 +15,7 @@
     "ndi_csv": "./data/20260804_test_data/ParticipantData04-08-2026_14-35-42.csv",
     "video_input": "./data/20260804_test_data/video_stream_1_20260804_143625.mp4",
     "timestamp": "./data/20260804_test_data/video_stream_1_20260804_143625_timestamps.txt",
-    "output": "./data/20260804_test_data/reprojection_video_gripper.mp4",
+    "output": "./data/20260804_test_data/reprojection_video_test.mp4",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -51,6 +51,10 @@
   },
   "camera": {
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"
+  },
+  "ndi_marker":{
+    "units":"mm",
+    "translation": [-11.4, 0.0, 10.0]
   }
 
 }

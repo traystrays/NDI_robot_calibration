@@ -7,6 +7,8 @@ import pandas as pd
 # accepts Path or string
 PathLike: TypeAlias = str | Path
 
+from .transforms import as_transform, is_valid_transform
+
 
 def load_si_data(csv_path: PathLike) -> pd.DataFrame:
     """
@@ -121,3 +123,25 @@ def clean_si_data(
     return pd.DataFrame(
         {"timestamp": time_data[timestamp_column], "Transforms": transforms}
     )
+
+def apply_transform(data: pd.DataFrame, old_name: str, new_name: str,transform:np.ndarray):
+    """
+    Apply a 4x4 transformation to the named data column. Note this is specifically for directly transforming to a pd.DataFrame, not for general use.
+    """
+    if old_name not in data.columns:
+        raise ValueError(f"Column '{old_name}' not found in data.")
+
+    if transform.shape != (4,4):
+        raise ValueError(f"Transform must be a 4x4 matrix; got shape {transform.shape}")
+
+    transform = as_transform(transform)
+
+    data[new_name] = None  # Initialize the new column
+
+    for idx, row in data.iterrows():
+        og_transform = as_transform(row[old_name])
+        new_transform = og_transform @ transform
+        if not is_valid_transform(new_transform, rotation_atol=2e-5):
+            print(new_transform)
+            raise ValueError(f"Resulting transform at index {idx} is not valid.")
+        data.at[idx, new_name] = new_transform

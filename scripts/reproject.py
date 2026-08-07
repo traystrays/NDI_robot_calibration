@@ -135,6 +135,37 @@ def NDI_in_cam(
     return cam_T_marker
 
 
+def SI_marker_in_cam(
+    base_T_ecm: np.ndarray,
+    ecm_T_cam: np.ndarray,
+    base_T_marker: np.ndarray,
+) -> np.ndarray:
+    """Return the SI-predicted marker pose in camera coordinates."""
+    base_T_cam = as_transform(base_T_ecm) @ as_transform(ecm_T_cam)
+    return invert_transform(base_T_cam) @ as_transform(base_T_marker)
+
+
+def marker_mount_from_config(config: dict[str, Any]) -> np.ndarray:
+    """Build ``gripper_T_marker`` from the configured marker translation."""
+    marker_config = config.get("ndi_marker", {})
+    translation = np.asarray(
+        marker_config.get("translation", [0.0, 0.0, 0.0]),
+        dtype=float,
+    )
+    if translation.shape != (3,):
+        raise ValueError("ndi_marker.translation must contain three values.")
+
+    units = marker_config.get("units", "m")
+    if units == "mm":
+        translation = translation / 1000.0
+    elif units != "m":
+        raise ValueError("ndi_marker.units must be 'm' or 'mm'.")
+
+    gripper_T_marker = np.eye(4, dtype=float)
+    gripper_T_marker[:3, 3] = translation
+    return gripper_T_marker
+
+
 def project_camera_position(
     camera_position: np.ndarray,
     camera_matrix: np.ndarray,
@@ -191,6 +222,7 @@ def prepare_frame_poses(
     """
     reprojection = config["reprojection"]
     ndi_config = config["ndi"]
+    si_config = config["si_arm"]
     ecm_config = config["si_ecm"]
     matching_config = config["matching"]
     video_config = config["video"]
@@ -204,6 +236,19 @@ def prepare_frame_poses(
         project_path(reprojection["si_csv"]),
         timestamp_column=ecm_config["timestamp_column"],
         arm_column=ecm_config["ecm_column"],
+    )
+    si_data = clean_si_data(
+        project_path(reprojection["si_csv"]),
+        timestamp_column=si_config["timestamp_column"],
+        arm_column=si_config["arm_column"],
+    )
+
+    gripper_T_marker = marker_mount_from_config(config)
+    si_marker_data = si_data.copy()
+    si_marker_data["Transforms"] = si_marker_data["Transforms"].map(
+        lambda base_T_gripper: (
+            as_transform(base_T_gripper) @ gripper_T_marker
+        )
     )
 
     matched_data, _, matched_count, _ = match(
@@ -219,6 +264,17 @@ def prepare_frame_poses(
         "NDI Transform",
         "ECM Transform",
     ]
+
+    si_marker_data = si_marker_data.rename(
+        columns={"Transforms": "SI with marker Transform"}
+    ).sort_values("timestamp")
+    matched_data = pd.merge_asof(
+        matched_data.sort_values("timestamp"),
+        si_marker_data,
+        on="timestamp",
+        direction="nearest",
+        tolerance=pd.Timedelta(matching_config["time_tolerance"]),
+    )
     return match_video(
         matched_data,
         project_path(reprojection["timestamp"]),
@@ -265,9 +321,12 @@ def write_reprojected_video(
             f"Could not initialize video input/output for {output_path}."
         )
 
-    projected_count = 0
-    outside_image_count = 0
-    behind_camera_count = 0
+    ndi_projected_count = 0
+    ndi_outside_image_count = 0
+    ndi_behind_camera_count = 0
+    si_projected_count = 0
+    si_outside_image_count = 0
+    si_behind_camera_count = 0
     unmatched_count = 0
     processed_count = 0
 
@@ -282,44 +341,45 @@ def write_reprojected_video(
             row = frame_poses.iloc[frame_number]
             ndi_transform = row["NDI Transform"]
             ecm_transform = row["ECM Transform"]
+            si_marker_transform = row["SI with marker Transform"]
 
-            if not (
-                isinstance(ndi_transform, np.ndarray) # must be a np.ndarray
-                and isinstance(ecm_transform, np.ndarray) # must be a np.ndarray
+            ecm_is_valid = (
+                isinstance(ecm_transform, np.ndarray)
+                and is_valid_transform(ecm_transform, rotation_atol=2e-5)
+            )
+            ndi_is_valid = (
+                isinstance(ndi_transform, np.ndarray)
+                and is_valid_transform(ndi_transform, rotation_atol=2e-5)
+            )
+            si_is_valid = (
+                isinstance(si_marker_transform, np.ndarray)
                 and is_valid_transform(
-                    ndi_transform,
+                    si_marker_transform,
                     rotation_atol=2e-5,
                 )
-                and is_valid_transform(
-                    ecm_transform,
-                    rotation_atol=2e-5,
-                )
-            ):
+            )
+
+            if not ecm_is_valid or not (ndi_is_valid or si_is_valid):
                 unmatched_count += 1
                 writer.write(frame)
                 processed_count += 1
                 continue
 
-            cam_T_marker = NDI_in_cam(
-                ecm_transform,
-                ndi_T_base,
-                ecm_T_cam,
-                ndi_transform,
-            )
-            camera_position = cam_T_marker[:3, 3]
-            pixel = project_camera_position(
-                camera_position,
-                camera_matrix,
-                distortion,
-            )
+            if ndi_is_valid:
+                cam_T_marker = NDI_in_cam(
+                    ecm_transform,
+                    ndi_T_base,
+                    ecm_T_cam,
+                    ndi_transform,
+                )
+                pixel = project_camera_position(
+                    cam_T_marker[:3, 3], camera_matrix, distortion
+                )
 
-            if pixel is None:
-                behind_camera_count += 1
-            else:
-                pixel_x, pixel_y = pixel
-                # check it is within bounds of the image
-                if 0 <= pixel_x < width and 0 <= pixel_y < height:
-                    center = (int(round(pixel_x)), int(round(pixel_y)))
+                if pixel is None:
+                    ndi_behind_camera_count += 1
+                elif 0 <= pixel[0] < width and 0 <= pixel[1] < height:
+                    center = tuple(int(round(value)) for value in pixel)
                     cv2.circle(
                         frame,
                         center,
@@ -346,9 +406,46 @@ def write_reprojected_video(
                         2,
                         cv2.LINE_AA,
                     )
-                    projected_count += 1
+                    ndi_projected_count += 1
                 else:
-                    outside_image_count += 1
+                    ndi_outside_image_count += 1
+
+            if si_is_valid:
+                cam_T_si_marker = SI_marker_in_cam(
+                    ecm_transform,
+                    ecm_T_cam,
+                    si_marker_transform,
+                )
+                pixel = project_camera_position(
+                    cam_T_si_marker[:3, 3], camera_matrix, distortion
+                )
+
+                if pixel is None:
+                    si_behind_camera_count += 1
+                elif 0 <= pixel[0] < width and 0 <= pixel[1] < height:
+                    center = tuple(int(round(value)) for value in pixel)
+                    cv2.drawMarker(
+                        frame,
+                        center,
+                        (255, 0, 255),
+                        markerType=cv2.MARKER_CROSS,
+                        markerSize=marker_radius * 2 + 6,
+                        thickness=3,
+                        line_type=cv2.LINE_AA,
+                    )
+                    cv2.putText(
+                        frame,
+                        "SI marker",
+                        (center[0] + 15, center[1] + 25),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 0, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
+                    si_projected_count += 1
+                else:
+                    si_outside_image_count += 1
 
             writer.write(frame)
             processed_count += 1
@@ -358,10 +455,13 @@ def write_reprojected_video(
 
     return {
         "processed_frames": processed_count,
-        "projected_frames": projected_count,
+        "ndi_projected_frames": ndi_projected_count,
+        "si_projected_frames": si_projected_count,
         "unmatched_frames": unmatched_count,
-        "behind_camera_frames": behind_camera_count,
-        "outside_image_frames": outside_image_count,
+        "ndi_behind_camera_frames": ndi_behind_camera_count,
+        "si_behind_camera_frames": si_behind_camera_count,
+        "ndi_outside_image_frames": ndi_outside_image_count,
+        "si_outside_image_frames": si_outside_image_count,
     }
 
 
