@@ -25,6 +25,7 @@ from ndi_robot_registration.clean_si_data import clean_si_data
 from ndi_robot_registration.match import match
 from ndi_robot_registration.transforms import (
     as_transform,
+    average_transforms,
     invert_transform,
     is_valid_transform,
     rotation_angle_degrees,
@@ -66,9 +67,10 @@ def calculate_errors(
     matched_data: pd.DataFrame,
     ndi_T_base: np.ndarray,
     gripper_T_marker: np.ndarray,
-) -> pd.DataFrame:
-    """Return one prediction residual record per valid synchronized observation."""
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Return per-observation errors and the average residual transform."""
     records = []
+    residuals = []
     for matched_index, row in matched_data.iterrows():
         measured = as_transform(row["NDI Transform"])
         base_T_gripper = as_transform(row["SI Transform"])
@@ -80,22 +82,23 @@ def calculate_errors(
 
         predicted = ndi_T_base @ base_T_gripper @ gripper_T_marker
         residual = invert_transform(predicted) @ measured
-        translation_vector = residual[:3, 3]
+        residuals.append(residual)
+        translation_vector_ndi = measured[:3, 3] - predicted[:3, 3]
         records.append(
             {
                 "matched_index": int(matched_index),
                 "timestamp": row["timestamp"],
                 "translation_error_mm": float(
-                    np.linalg.norm(translation_vector) * 1000.0
+                    np.linalg.norm(translation_vector_ndi) * 1000.0
                 ),
-                "translation_error_x_mm": float(
-                    translation_vector[0] * 1000.0
+                "translation_residual_x_ndi_mm": float(
+                    translation_vector_ndi[0] * 1000.0
                 ),
-                "translation_error_y_mm": float(
-                    translation_vector[1] * 1000.0
+                "translation_residual_y_ndi_mm": float(
+                    translation_vector_ndi[1] * 1000.0
                 ),
-                "translation_error_z_mm": float(
-                    translation_vector[2] * 1000.0
+                "translation_residual_z_ndi_mm": float(
+                    translation_vector_ndi[2] * 1000.0
                 ),
                 "rotation_error_deg": rotation_angle_degrees(
                     residual[:3, :3]
@@ -104,7 +107,7 @@ def calculate_errors(
         )
     if not records:
         raise ValueError("No valid synchronized observations were available.")
-    return pd.DataFrame.from_records(records)
+    return pd.DataFrame.from_records(records), average_transforms(residuals)
 
 
 def print_summary(name: str, values: np.ndarray, unit: str) -> None:
@@ -117,6 +120,22 @@ def print_summary(name: str, values: np.ndarray, unit: str) -> None:
     print(f"  95th:   {np.quantile(values, 0.95):.6f} {unit}")
     print(f"  99th:   {np.quantile(values, 0.99):.6f} {unit}")
     print(f"  max:    {values.max():.6f} {unit}")
+
+
+def print_translation_bias(errors: pd.DataFrame) -> None:
+    """Print the signed mean translation residual in NDI coordinates."""
+    columns = [
+        "translation_residual_x_ndi_mm",
+        "translation_residual_y_ndi_mm",
+        "translation_residual_z_ndi_mm",
+    ]
+    mean_bias = errors[columns].to_numpy(dtype=float).mean(axis=0)
+
+    print("\nTranslation bias in NDI frame:")
+    print(f"  mean x: {mean_bias[0]:.6f} mm")
+    print(f"  mean y: {mean_bias[1]:.6f} mm")
+    print(f"  mean z: {mean_bias[2]:.6f} mm")
+    print(f"  magnitude: {np.linalg.norm(mean_bias):.6f} mm")
 
 
 def main() -> None:
@@ -196,7 +215,7 @@ def main() -> None:
     )
     matched_data.columns = ["timestamp", "NDI Transform", "SI Transform"]
 
-    errors = calculate_errors(
+    errors, average_residual = calculate_errors(
         matched_data,
         ndi_T_base,
         gripper_T_marker,
@@ -210,13 +229,17 @@ def main() -> None:
     print(f"Matched observations: {matched_count}")
     print(f"Dropped timestamp matches: {dropped_count}")
     print(f"Valid observations evaluated: {len(errors)}")
+    np.set_printoptions(precision=8, suppress=True)
+    print("\nAverage residual transform (systematic pose bias):")
+    print(average_residual)
     print_summary(
-        "Translation error",
+        "3D translation error",
         errors["translation_error_mm"].to_numpy(),
         "mm",
     )
+    print_translation_bias(errors)
     print_summary(
-        "Rotation error",
+        "3D rotation error",
         errors["rotation_error_deg"].to_numpy(),
         "deg",
     )
