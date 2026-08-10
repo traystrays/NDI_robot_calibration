@@ -15,6 +15,9 @@ from ndi_robot_registration.transforms import (
     invert_transform,
     is_valid_transform,
 )
+
+from toolbox.projection import Projector
+
 try:
     from scripts.reproject import (
         CONFIG_PATH,
@@ -36,13 +39,13 @@ except ModuleNotFoundError:
     )
 
 
-# Plane dimensions [x, y, z] in metres in the end-effector frame. A plane has
-# exactly two nonzero dimensions. This default is a 50 mm x 50 mm XY plane
-# whose normal points along the end effector's Z axis.
+# Plane dimensions [x, y, z] in metres in the end-effector frame.
+# A plane has exactly two nonzero dimensions.
 SIZE = np.array([0.050, 0.050, 0.0], dtype=float)
 
 # Translation from the end-effector origin to the plane center, expressed in
 # end-effector coordinates and metres.
+# Realistically this should be a transform matrix
 PLANE_OFFSET = np.array([0.0, 0.0, 0.0], dtype=float)
 
 
