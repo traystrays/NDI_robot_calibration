@@ -15,7 +15,8 @@ class Projector:
 
     def project_point(self, point) -> np.ndarray:
         """
-        Project a 3D position to 2D pixel coordinates, with camera intrinsics and distortion coeffs.
+        Project a 3D position to 2D pixel coordinates. 
+        Point already in camera frame.
         """
 
         position = np.asarray(point, dtype=float).reshape(3)
@@ -43,13 +44,14 @@ class Projector:
         return pixel
 
             
-    def project_line(line_points, camera_matrix, distortion) -> np.ndarray:
+    def project_line(self, line_points) -> np.ndarray:
         """
         Project a 3D line to 2D pixel coordinates, with camera intrinsics and distortion coeffs.
-        line_points: 2x3 array of 3D points defining the line
+        line_points: 2x3 array of START and END 3D points defining the line
+        TS can literally be replaced by just 2 calls of project point
         """
 
-        line_points = np.asarray(line_points, dtype=float).reshape(2, 3)
+        line_points = np.asarray(line_points, dtype=np.float32).reshape(2, 3)
         if not np.isfinite(line_points).all():
             return None
 
@@ -58,8 +60,8 @@ class Projector:
             line_points.reshape(1, 2, 3),
             np.zeros(3, dtype=np.float),
             np.zeros(3, dtype=np.float),
-            camera_matrix,
-            distortion,
+            self.camera_matrix,
+            self.distortion,
         )
 
         pixel_line = image_points.reshape(2, 2).astype(int)
@@ -84,7 +86,7 @@ class Projector:
         return frame
 
 
-    def draw_coordinate_axis(frame, position: np.ndarray, axis_length=10.0):
+    def draw_coordinate_axis(self, frame, position: np.ndarray, axis_length=10.0):
         """
         POSITION needs to be already in camera coordinates. 
         Draws coordinate axis on the frame, with origin at end effector position.
@@ -101,6 +103,23 @@ class Projector:
         x_axis = origin + rotation[:, 0] * axis_length
         y_axis = origin + rotation[:, 1] * axis_length
         z_axis = origin + rotation[:, 2] * axis_length
+
+        # project points to 2D
+        origin_pixel = self.project_point(origin)
+        x_pixel = self.project_point(x_axis)            
+        y_pixel = self.project_point(y_axis)
+        z_pixel = self.project_point(z_axis)
+
+        if origin_pixel is None:
+            raise ValueError(f"Origin point {origin} is not projectable to image.")
+
+        cv2.line(frame, tuple(origin_pixel), tuple(x_pixel), AXIS_COLORS[0], 2)
+        cv2.line(frame, tuple(origin_pixel), tuple(y_pixel), AXIS_COLORS[1], 2)
+        cv2.line(frame, tuple(origin_pixel), tuple(z_pixel), AXIS_COLORS[2], 2)
+
+        return frame
+
+
 
         
 

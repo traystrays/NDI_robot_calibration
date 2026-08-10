@@ -20,6 +20,8 @@ from ndi_robot_registration.transforms import (
     is_valid_transform,
 )
 
+from toolbox.projection import Projector
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = PROJECT_ROOT / "scripts" / "calib_config.json"
@@ -487,6 +489,9 @@ def main() -> None:
     camera_matrix, distortion = load_camera_parameters(
         camera_parameter_path
     )
+
+    projector = Projector(camera_matrix, distortion)
+
 
     width, height, fps, frame_count = get_video_properties(video_path)
     print(
