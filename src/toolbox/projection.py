@@ -13,7 +13,7 @@ class Projector:
         self.distortion = distortion
 
 
-    def project_point(self, point) -> np.ndarray:
+    def project_point(self, point):
         """
         Project a 3D position to 2D pixel coordinates. 
         Point already in camera frame.
@@ -30,8 +30,8 @@ class Projector:
         # use projectPoints
         image_points, _ = cv2.projectPoints(
             position.reshape(1, 1, 3),
-            np.zeros(3, dtype=np.float),
-            np.zeros(3, dtype=np.float),
+            np.zeros(3, dtype=np.float32),
+            np.zeros(3, dtype=np.float32),
             self.camera_matrix,
             self.distortion,
         )
@@ -44,7 +44,7 @@ class Projector:
         return pixel
 
             
-    def project_line(self, line_points) -> np.ndarray:
+    def project_line(self, line_points):
         """
         Project a 3D line to 2D pixel coordinates, with camera intrinsics and distortion coeffs.
         line_points: 2x3 array of START and END 3D points defining the line
@@ -58,8 +58,8 @@ class Projector:
         # use projectPoints
         image_points, _ = cv2.projectPoints(
             line_points.reshape(1, 2, 3),
-            np.zeros(3, dtype=np.float),
-            np.zeros(3, dtype=np.float),
+            np.zeros(3, dtype=np.float32),
+            np.zeros(3, dtype=np.float32),
             self.camera_matrix,
             self.distortion,
         )
@@ -71,7 +71,7 @@ class Projector:
         return pixel_line
 
 
-    def draw_point(frame: np.ndarray, pixel: np.ndarray, color=(0, 255, 0), radius=5) -> np.ndarray:
+    def draw_point(self, frame: np.ndarray, pixel: np.ndarray, color=(0, 255, 0), radius=5) -> np.ndarray:
         """
         Takes a point in 3D space and projects it onto 2D image frame.
         Returns a frame with with point drawn.
@@ -112,33 +112,27 @@ class Projector:
 
         if origin_pixel is None:
             raise ValueError(f"Origin point {origin} is not projectable to image.")
+        
+        if x_pixel is None or y_pixel is None or z_pixel is None:
+            raise ValueError(f"One of the axis points is not projectable to image: x={x_axis}, y={y_axis}, z={z_axis}.")
 
-        cv2.line(frame, tuple(origin_pixel), tuple(x_pixel), AXIS_COLORS[0], 2)
-        cv2.line(frame, tuple(origin_pixel), tuple(y_pixel), AXIS_COLORS[1], 2)
-        cv2.line(frame, tuple(origin_pixel), tuple(z_pixel), AXIS_COLORS[2], 2)
+        cv2.line(frame, tuple(map(int, origin_pixel)), tuple(map(int, x_pixel)), AXIS_COLORS[0], 2)
+        cv2.line(frame, tuple(map(int, origin_pixel)), tuple(map(int, y_pixel)), AXIS_COLORS[1], 2)
+        cv2.line(frame, tuple(map(int, origin_pixel)), tuple(map(int, z_pixel)), AXIS_COLORS[2], 2)
 
         return frame
 
 
 
-        
-
-        
-
-
-
-
-    def draw_text(frame, text:str, position: tuple, font_scale=1.0, color=(0, 255, 0), thickness=2) -> np.ndarray:
+    def draw_text(self,frame, text:str, position: tuple, font_scale=1.0, color=(0, 255, 0), thickness=2) -> np.ndarray:
         """
         Writes text over frame in green unless otherwise specified
         """
         
         x = int(position[0])
         y = int(position[1])
+        
         cv2.putText(frame, text, (x,y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, lineType=cv2.LINE_AA)
 
         return frame
         
-    def project_plane(frame, transform: np.ndarray):
-
-        return
