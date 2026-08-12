@@ -180,7 +180,7 @@ def main() :
     ndi_config = config["ndi"]
     matching_config = config["matching"]
     calibration_config = config["calibration"]
-    video_config = config["video"] # needed key
+    video_config = config["video"] # need key
     output_config = config.get("output", {})
     ndi_marker = config.get("ndi_marker", {}) # key may not be present
 

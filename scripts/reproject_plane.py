@@ -56,11 +56,9 @@ def plane_corners_from_size(
     offset: np.ndarray | None = None,
 ) -> np.ndarray:
     """
-    Return four plane corners expressed in end-effector coordinates.
-
-    ``size`` is ``[x, y, z]`` and must contain exactly two positive values and
-    one zero value. The zero dimension determines the plane normal. With
-    ``centered=True``, the end-effector origin is at the plane center.
+    Return four plane corners expressed in end-effector coordinates. [0.0, 0.0, 0.0] is the end-effector origin.
+    If it is centered, the plane is centered on the end-effector origin. If not, the plane's minimum corner is at the origin.
+    Then an offset is provided.
     """
     dimensions = np.asarray(size, dtype=float).reshape(3)
     if not np.isfinite(dimensions).all() or np.any(dimensions < 0):
@@ -73,6 +71,7 @@ def plane_corners_from_size(
             "dimension, for example [0.05, 0.05, 0.0]."
         )
 
+    # centered is TRUE case
     axis_u, axis_v = (int(axis) for axis in active_axes)
     length_u = dimensions[axis_u]
     length_v = dimensions[axis_v]
@@ -86,6 +85,8 @@ def plane_corners_from_size(
             ],
             dtype=float,
         )
+
+    # False case
     else:
         coordinates = np.array(
             [
@@ -115,7 +116,10 @@ def transform_points(
     transform: np.ndarray,
     points: np.ndarray,
 ) -> np.ndarray:
-    """Apply a rigid transform to an Nx3 array of points."""
+    """
+    Apply a rigid transform to an Nx3 array of points.
+    Multiple points!!!
+    """
     matrix = as_transform(transform)
     points_array = np.asarray(points, dtype=float)
     if points_array.ndim != 2 or points_array.shape[1] != 3:
@@ -126,36 +130,15 @@ def transform_points(
     )
 
 
-def coordinate_axis_points(
-    length: float,
-    *,
-    origin: np.ndarray | None = None,
-) -> np.ndarray:
-    """Return the origin and positive X/Y/Z endpoints in one frame."""
-    if not np.isfinite(length) or length <= 0:
-        raise ValueError("Axis length must be a positive finite value.")
-    axis_origin = (
-        np.zeros(3, dtype=float)
-        if origin is None
-        else np.asarray(origin, dtype=float).reshape(3)
-    )
-    return np.vstack(
-        [
-            axis_origin,
-            axis_origin + [length, 0.0, 0.0],
-            axis_origin + [0.0, length, 0.0],
-            axis_origin + [0.0, 0.0, length],
-        ]
-    )
-
-
 def plane_in_camera(
     base_T_end_effector: np.ndarray,
     base_T_ecm: np.ndarray,
     ecm_T_cam: np.ndarray,
     plane_corners_end_effector: np.ndarray,
 ) -> np.ndarray:
-    """Return the end-effector-attached plane corners in camera coordinates."""
+    """
+    Return the end-effector-attached plane corners in camera coordinates.
+    """
     base_T_cam = as_transform(base_T_ecm) @ as_transform(ecm_T_cam)
     cam_T_end_effector = (
         invert_transform(base_T_cam)
@@ -167,77 +150,10 @@ def plane_in_camera(
     )
 
 
-def project_camera_points(
-    camera_points: np.ndarray,
-    camera_matrix: np.ndarray,
-    distortion: np.ndarray,
-) -> np.ndarray | None:
-    """Project camera-frame 3D points into image coordinates."""
-    points = np.asarray(camera_points, dtype=float)
-    if (
-        points.ndim != 2
-        or points.shape[1] != 3
-        or len(points) == 0
-        or not np.isfinite(points).all()
-    ):
-        raise ValueError("Camera points must have shape (N, 3).")
-    if np.any(points[:, 2] <= 0):
-        return None
-
-    image_points, _ = cv2.projectPoints(
-        points.reshape(-1, 1, 3),
-        np.zeros(3, dtype=float),
-        np.zeros(3, dtype=float),
-        camera_matrix,
-        distortion,
-    )
-    pixels = image_points.reshape(-1, 2)
-    return pixels if np.isfinite(pixels).all() else None
-
-
-def draw_coordinate_axes(
-    frame: np.ndarray,
-    image_points: np.ndarray,
-) -> None:
-    """Draw RGB X/Y/Z arrows from four projected axis points."""
-    pixels = np.round(np.asarray(image_points, dtype=float)).astype(int)
-    if pixels.shape != (4, 2):
-        raise ValueError("Axis image points must have shape (4, 2).")
-
-    origin = tuple(pixels[0])
-    axes = (
-        ("X", tuple(pixels[1]), (0, 0, 255)),
-        ("Y", tuple(pixels[2]), (0, 255, 0)),
-        ("Z", tuple(pixels[3]), (255, 0, 0)),
-    )
-    for label, endpoint, colour in axes:
-        cv2.arrowedLine(
-            frame,
-            origin,
-            endpoint,
-            colour,
-            thickness=3,
-            line_type=cv2.LINE_AA,
-            tipLength=0.18,
-        )
-        cv2.putText(
-            frame,
-            label,
-            (endpoint[0] + 5, endpoint[1] - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            colour,
-            2,
-            cv2.LINE_AA,
-        )
-    cv2.circle(frame, origin, 4, (255, 255, 255), thickness=-1)
-
-
-def create_default_plane_image(
-    width: int = 640,
-    height: int = 640,
-) -> np.ndarray:
-    """Create a visible checkerboard texture when no image is configured."""
+def default_plane_image(width: int = 640, height: int = 640,) -> np.ndarray:
+    """
+    Create a defaultcheckerboard texture when no image is configured.
+    """
     image = np.full((height, width, 3), 235, dtype=np.uint8)
     cells = 8
     cell_width = width // cells
@@ -257,23 +173,13 @@ def create_default_plane_image(
                     (60, 120, 220),
                     thickness=-1,
                 )
-    cv2.putText(
-        image,
-        "END EFFECTOR PLANE",
-        (35, height // 2),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
-        (0, 0, 0),
-        3,
-        cv2.LINE_AA,
-    )
     return image
 
 
 def load_plane_image(image_path: Path | None) -> np.ndarray:
     """Load a configured BGR/BGRA image or create a default texture."""
     if image_path is None:
-        return create_default_plane_image()
+        return default_plane_image()
     image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise FileNotFoundError(f"Could not load plane image: {image_path}")
@@ -289,7 +195,9 @@ def overlay_plane_image(
     *,
     opacity: float = 0.75,
 ) -> np.ndarray:
-    """Warp a source image onto four projected plane corners and composite it."""
+    """
+    Warp a source image onto four projected plane corners and overlay onto original frame.
+    """
     if not 0.0 <= opacity <= 1.0:
         raise ValueError("Plane opacity must be between 0 and 1.")
 
@@ -382,7 +290,7 @@ def axis_length_from_config(config: dict[str, Any]) -> float:
     return length / 1000.0 if units == "mm" else length
 
 
-def prepare_plane_frame_poses(config: dict[str, Any]) -> pd.DataFrame:
+def match_frame_poses(config: dict[str, Any]) -> pd.DataFrame:
     """Match time-varying end-effector and ECM poses to video frames."""
     reprojection = config["reprojection"]
     arm_config = config["si_arm"]
@@ -426,10 +334,8 @@ def render_plane_frame(
     frame: np.ndarray,
     frame_pose: pd.Series,
     ecm_T_cam: np.ndarray,
-    camera_matrix: np.ndarray,
-    distortion: np.ndarray,
+    camera: Projector,
     plane_corners_end_effector: np.ndarray,
-    axis_points_end_effector: np.ndarray,
     plane_image: np.ndarray,
     *,
     opacity: float = 0.75,
@@ -458,10 +364,9 @@ def render_plane_frame(
         ecm_T_cam,
         plane_corners_end_effector,
     )
-    image_corners = project_camera_points(
-        camera_corners,
-        camera_matrix,
-        distortion,
+
+    image_corners = camera.project_points(
+        camera_corners
     )
     if image_corners is None:
         return frame, "behind_camera"
@@ -482,31 +387,14 @@ def render_plane_frame(
         image_corners,
         opacity=opacity,
     )
-    cv2.polylines(
-        rendered_frame,
-        [np.round(image_corners).astype(np.int32)],
-        isClosed=True,
-        color=(0, 255, 255),
-        thickness=2,
-        lineType=cv2.LINE_AA,
-    )
 
     base_T_cam = as_transform(ecm_transform) @ as_transform(ecm_T_cam)
     cam_T_end_effector = (
         invert_transform(base_T_cam)
         @ as_transform(end_effector_transform)
     )
-    camera_axis_points = transform_points(
-        cam_T_end_effector,
-        axis_points_end_effector,
-    )
-    image_axis_points = project_camera_points(
-        camera_axis_points,
-        camera_matrix,
-        distortion,
-    )
-    if image_axis_points is not None:
-        draw_coordinate_axes(rendered_frame, image_axis_points)
+    if cam_T_end_effector is not None:
+        camera.draw_coordinate_axis(rendered_frame, cam_T_end_effector, axis_length=0.01)
     return rendered_frame, "rendered"
 
 
@@ -515,10 +403,8 @@ def preview_plane_frame(
     frame_number: int,
     frame_poses: pd.DataFrame,
     ecm_T_cam: np.ndarray,
-    camera_matrix: np.ndarray,
-    distortion: np.ndarray,
+    camera: Projector,
     plane_corners_end_effector: np.ndarray,
-    axis_points_end_effector: np.ndarray,
     plane_image: np.ndarray,
     *,
     opacity: float = 0.75,
@@ -550,24 +436,13 @@ def preview_plane_frame(
         frame,
         frame_poses.iloc[frame_number],
         ecm_T_cam,
-        camera_matrix,
-        distortion,
+        camera,
         plane_corners_end_effector,
-        axis_points_end_effector,
         plane_image,
         opacity=opacity,
     )
 
-    cv2.putText(
-        rendered_frame,
-        f"Frame {frame_number} | {status}",
-        (25, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (0, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
+    camera.draw_text(rendered_frame, f"Frame {frame_number} | {status}", (25, 40), 0.8, (0, 255, 255))
 
     if preview_output is not None:
         preview_output.parent.mkdir(parents=True, exist_ok=True)
@@ -591,10 +466,8 @@ def write_plane_video(
     output_path: Path,
     frame_poses: pd.DataFrame,
     ecm_T_cam: np.ndarray,
-    camera_matrix: np.ndarray,
-    distortion: np.ndarray,
+    camera:Projector,
     plane_corners_end_effector: np.ndarray,
-    axis_points_end_effector: np.ndarray,
     plane_image: np.ndarray,
     *,
     opacity: float = 0.75,
@@ -635,10 +508,8 @@ def write_plane_video(
                 frame,
                 frame_poses.iloc[frame_number],
                 ecm_T_cam,
-                camera_matrix,
-                distortion,
+                camera,
                 plane_corners_end_effector,
-                axis_points_end_effector,
                 plane_image,
                 opacity=opacity,
             )
@@ -707,7 +578,8 @@ def main() -> None:
     parameter_path = project_path(config["inputs"]["si_robot_params"])
     camera_parameter_path = project_path(
         config["camera"]["parameters_file"]
-    )
+    )  
+
     image_value = plane_config.get("image")
     image_path = project_path(image_value) if image_value else None
 
@@ -715,16 +587,17 @@ def main() -> None:
     camera_matrix, distortion = load_camera_parameters(
         camera_parameter_path
     )
+
+    camera = Projector(camera_matrix, distortion)
+
     plane_corners = plane_corners_from_size(
         size_from_config(config),
         centered=bool(plane_config.get("centered", True)),
         offset=offset_from_config(config),
     )
-    axis_points = coordinate_axis_points(
-        axis_length_from_config(config),
-    )
+
     plane_image = load_plane_image(image_path)
-    frame_poses = prepare_plane_frame_poses(config)
+    frame_poses = match_frame_poses(config)
 
     print(f"Plane corners in end-effector frame (metres):\n{plane_corners}")
 
@@ -738,10 +611,8 @@ def main() -> None:
             arguments.frame,
             frame_poses,
             ecm_T_cam,
-            camera_matrix,
-            distortion,
+            camera,
             plane_corners,
-            axis_points,
             plane_image,
             opacity=opacity,
             preview_output=preview_output,
@@ -760,10 +631,8 @@ def main() -> None:
         output_path,
         frame_poses,
         ecm_T_cam,
-        camera_matrix,
-        distortion,
+        camera,
         plane_corners,
-        axis_points,
         plane_image,
         opacity=opacity,
     )

@@ -11,11 +11,10 @@
     "marker_radius": 10
   },
   "reprojection": {
-    "si_csv": "./data/20260804_test_data/data_local_part_1_4_8_2026_14_36_44.csv",
-    "ndi_csv": "./data/20260804_test_data/ParticipantData04-08-2026_14-35-42.csv",
-    "video_input": "./data/20260804_test_data/video_stream_1_20260804_143625.mp4",
-    "timestamp": "./data/20260804_test_data/video_stream_1_20260804_143625_timestamps.txt",
-    "output": "./data/20260804_test_data/reprojection_video_both_gripper.mp4",
+    "si_csv": "./data/20260804_holding_data/data_local_part_1_4_8_2026_14_50_26.csv",
+    "video_input": "./data/20260804_holding_data/video_stream_1_20260804_145013.mp4",
+    "timestamp": "./data/20260804_holding_data/video_stream_1_20260804_145013_timestamps.txt",
+    "output": "./data/20260804_holding_data/reprojection_video.mp4",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -53,14 +52,14 @@
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"
   },
   "plane": {
-    "size": [0.0, 100.0, 50.0],
-    "offset": [0.0, 10.0, 100.0],
+    "size": [0.0, 50.0, 100.0],
+    "offset": [0.0, -50.0, 30.0],
     "axis_length": 30.0,
     "units": "mm",
     "centered": false,
     "image": null,
     "opacity": 0.5,
-    "output": "./data/20260804_test_data/plane_overlay.mp4"
+    "output": "./data/20260804_holding_data/plane_overlay.mp4"
   },
   "ndi_marker":{
     "units":"mm",
