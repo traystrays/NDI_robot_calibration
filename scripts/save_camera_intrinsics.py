@@ -1,4 +1,4 @@
-"""Save the calibrated camera intrinsics used for NDI reprojection."""
+"""Save the calibrated camera intrinsics as npz file"""
 
 from pathlib import Path
 

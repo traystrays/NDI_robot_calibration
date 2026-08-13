@@ -13,7 +13,7 @@ class Projector:
         self.distortion = distortion
 
 
-    def project_point(self, point):
+    def project_point(self, point) -> np.ndarray | None:
         """
         Project a 3D position to 2D pixel coordinates. 
         Point already in camera frame.
@@ -43,7 +43,27 @@ class Projector:
         pixel = np.asarray([int(pixel_x), int(pixel_y)])
         return pixel
 
-            
+    def project_points(self, points) -> np.ndarray | None:
+        """
+        Project more than 1 point from 3D to 2D pixel coordinates.
+        Accepts an Nx3 array of points, returns an Nx2 array of pixel coordinates.
+        """
+        points = np.asarray(points, dtype=float)
+        if points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError(f"Expected an Nx3 array of points; got shape {points.shape}.")
+
+        pixel_points =[]
+        for point in points:
+            pixel = self.project_point(point)
+            if pixel is not None:
+                pixel_points.append(pixel)
+
+        if not pixel_points:
+            return None
+
+        return np.array(pixel_points)
+
+    
     def project_line(self, line_points):
         """
         Project a 3D line to 2D pixel coordinates, with camera intrinsics and distortion coeffs.
