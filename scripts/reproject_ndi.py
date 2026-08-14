@@ -1,6 +1,7 @@
 """
 Reproject the NDI-tracked marker position onto the recorded camera video.
-Produce overlay video with NDI marker and SI-predicted marker position.
+Produce overlay video with NDI marker and SI-robot-predicted marker position.
+    
 """
 
 import json

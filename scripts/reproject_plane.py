@@ -19,7 +19,7 @@ from ndi_robot_registration.transforms import (
 from toolbox.projection import Projector
 
 try:
-    from scripts.reproject import (
+    from scripts.reproject_ndi import (
         CONFIG_PATH,
         get_video_properties,
         load_camera_parameters,
@@ -29,7 +29,7 @@ try:
     )
 except ModuleNotFoundError:
     # Support direct execution with ``python scripts/reproject_plane.py``.
-    from reproject import (
+    from scripts.reproject_ndi import (
         CONFIG_PATH,
         get_video_properties,
         load_camera_parameters,

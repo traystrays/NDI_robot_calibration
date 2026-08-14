@@ -1,5 +1,5 @@
 """
-Toolbox for projecting points and drawing on images
+Toolbox for projecting points and drawing on images. Going from 3D to 2D pixel coords.
 """
 
 from copy import Error
@@ -24,7 +24,7 @@ class Projector:
             return None
 
         if position[2] <= 0:
-            Error(f"Point {position} is behind the camera (z <= 0).")
+            raise ValueError(f"Point {position} is behind the camera (z <= 0).")
             return None
 
         # use projectPoints
