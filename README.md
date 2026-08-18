@@ -5,3 +5,5 @@ Data is collected from davinci robots API and NDI polaris.
 
 ## Units
 Using meters 
+
+Adding data collection for NDI as well

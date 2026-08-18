@@ -1,5 +1,6 @@
 from toolbox.imaging import VideoCapture
 
+
 import cv2
 from pathlib import Path
 import time
