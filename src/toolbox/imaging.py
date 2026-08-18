@@ -1,164 +1,161 @@
-"""
-Opening and reading image live feed from cameras, saving timestamp and video frames.
-TODO: live feed open, time synconize frames
-Save data to file
-live-stream real time process 
-"""
+"""Camera discovery, preview, and timestamped video recording."""
+
+from __future__ import annotations
+
+import csv
+import threading
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
 
 import cv2
-from pathlib import Path
-from datetime import datetime
-import csv
-import time
+import numpy as np
 
-class VideoCapture:
-
-    def __init__(self, output_folder:Path):
-
-        self.output_folder = output_folder
-        self.timestamp_file = None
-        self.recording = False
-        self.fps = None
-        self.finish = False
-
-        if self.output_folder.exists() and not self.output_folder.is_dir():
-            raise ValueError(
-                f"{self.output_folder} needs to be a folder, not a file"
-            )
-            
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-
-        
-    def find_camera(self):
-        """
-        Find camera index by checking 10 
-        """
-        # let max cameras index be 10
-        max = 10
-
-        cams = []
-        for i in range(max):
-
-            cap = cv2.VideoCapture(i)
-        
-            if not cap.isOpened():
-                continue
-
-            cams.append(i)
-            cap.release()
-
-        if len(cams) == 0:
-            print("No cameras found")
-
-            return None
-        
-        print(f"found {cams}")
-        print("Press ENTER to select camera, press Q to quit program, press SPACE for next")
-
-        for i in cams:
-            cap = cv2.VideoCapture(i)
-
-            while True:
-
-                ret, frame = cap.read()
-
-                if not ret: break
-
-                cv2.imshow(f"camera {i}", frame)
-                key = cv2.waitKey(1) & 0xFF # mask for the 1st 8bits
-                # Pressed ENTER
-                if key == 13:
-                    print(f"camera selected {i}")
-                    
-                    self.index = i
-
-                    return i
-
-                if key == ord('q'):
-                    cv2.destroyAllWindows()
-                    print("Quitting program")
-                    
-                    return None
-
-                if key == 32:
-                    print("Moving to next camera")
-                    cv2.destroyWindow(f"camera {i}")
-                    break
-
-        return None
-
-    def record_video(self, camera_index: int):
-        """
-        Record video and timestamps. Saved to provided output folder path.
-        """
-
-        self.cap = cv2.VideoCapture(camera_index)
-
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Camera{camera_index} did not open. Check camera connection")
-
-        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-
-        # print(fps)
-
-        if self.fps == 0 or self.fps > 100: # if fps weird reset to fps = 30
-            print(self.fps)
-            self.fps = 30
-
-        now = datetime.now().strftime("%Y%m%d%H%M%S")
-        self.video_path = self.output_folder / f"_video_{now}.mp4"
-        self.timestamp_path = self.output_folder / f"_timestamp_{now}.txt"
-        
-        print(self.video_path, self.timestamp_path)
-        
-        # initialize VideoWriter
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        self.video_writer = cv2.VideoWriter(self.video_path, fourcc, self.fps, (width, height))
-        
-        print("Recording starting NOW")
-        self.recording = True
-        
-        self.recording_loop()
-
-        
-        
+FrameCallback = Callable[[int, np.ndarray], None]
 
 
-    def recording_loop(self):
-        
-        with open(self.timestamp_path, "w",newline='') as timestamp_file:
-            writer = csv.writer(timestamp_file)
-        
+def list_cameras(max_devices: int = 10) -> list[int]:
+    """Return camera indices that OpenCV can open."""
+    cameras: list[int] = []
+    for index in range(max_devices):
+        capture = cv2.VideoCapture(index)
         try:
-            while not self.finish:
-                self.ret, self.frame = self.cap.read()
-                
-                if not self.ret:
-                    print("Missing frame")
-                    break
-                    
-                else:
-                    timestamp = datetime.now().isoformat(timespec="microseconds")
-                    self.video_writer.write(self.frame)
-                    
-                    with open(self.timestamp_path, "a",newline='') as timestamp_file:
-                        writer = csv.writer(timestamp_file)
-                        writer.writerow([timestamp])
-
-                    cv2.imshow("US", self.frame)
-                    
-                    if cv2.waitKey (1) & 0xFF == ord('q'): 
-                        self.finish = True
-                    
+            if capture.isOpened():
+                cameras.append(index)
         finally:
-            self.end_recording()    
-                
-        
-    def end_recording(self):
-        self.cap.release()
-        self.video_writer.release()
-        self.recording = False
-        cv2.destroyAllWindows()
+            capture.release()
+    return cameras
 
+
+def read_camera_frame(camera_index: int) -> np.ndarray:
+    """Read one frame, used by a UI to preview/select a camera."""
+    capture = cv2.VideoCapture(camera_index)
+    try:
+        if not capture.isOpened():
+            raise RuntimeError(f"Could not open camera {camera_index}.")
+        ok, frame = capture.read()
+        if not ok:
+            raise RuntimeError(f"Could not read a frame from camera {camera_index}.")
+        return frame
+    finally:
+        capture.release()
+
+
+class VideoRecorder:
+    """Record one camera and a timestamp for every written frame.
+
+    Recording runs on a worker thread. ``frame_callback`` receives occasional
+    frame copies and can be used by a GUI for a live preview.
+    """
+
+    def __init__(
+        self,
+        camera_index: int,
+        video_path: str | Path,
+        timestamp_path: str | Path,
+        *,
+        resolution: tuple[int, int] = (1280, 720),
+        fps: float = 30.0,
+        frame_callback: FrameCallback | None = None,
+        preview_every: int = 2,
+    ) -> None:
+        self.camera_index = camera_index
+        self.video_path = Path(video_path)
+        self.timestamp_path = Path(timestamp_path)
+        self.resolution = resolution
+        self.requested_fps = fps
+        self.frame_callback = frame_callback
+        self.preview_every = max(1, preview_every)
+        self.error: Exception | None = None
+        self.frame_count = 0
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started_event = threading.Event()
+
+    @property
+    def recording(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, timeout: float = 5.0) -> None:
+        """Start recording and wait until the camera/writer is ready."""
+        if self.recording:
+            raise RuntimeError(f"Camera {self.camera_index} is already recording.")
+        self.video_path.parent.mkdir(parents=True, exist_ok=True)
+        self.timestamp_path.parent.mkdir(parents=True, exist_ok=True)
+        self.error = None
+        self.frame_count = 0
+        self._stop_event.clear()
+        self._started_event.clear()
+        self._thread = threading.Thread(
+            target=self._record, name=f"camera-{self.camera_index}", daemon=True
+        )
+        self._thread.start()
+        if not self._started_event.wait(timeout):
+            self.stop()
+            raise RuntimeError(f"Timed out opening camera {self.camera_index}.")
+        if self.error is not None:
+            error = self.error
+            self.stop()
+            raise RuntimeError(str(error)) from error
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Request a stop and wait for files and camera handles to close."""
+        self._stop_event.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout)
+            if self._thread.is_alive():
+                raise RuntimeError(f"Camera {self.camera_index} did not stop.")
+        self._thread = None
+
+    def _record(self) -> None:
+        capture = cv2.VideoCapture(self.camera_index)
+        writer: cv2.VideoWriter | None = None
+        try:
+            if not capture.isOpened():
+                raise RuntimeError(f"Could not open camera {self.camera_index}.")
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+            capture.set(cv2.CAP_PROP_FPS, self.requested_fps)
+
+            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = float(capture.get(cv2.CAP_PROP_FPS))
+            if fps <= 0 or fps > 240:
+                fps = self.requested_fps
+
+            writer = cv2.VideoWriter(
+                str(self.video_path), cv2.VideoWriter_fourcc(*"mp4v"),
+                fps, (width, height),
+            )
+            if not writer.isOpened():
+                raise RuntimeError(f"Could not create video file {self.video_path}.")
+
+            self._started_event.set()
+            with self.timestamp_path.open("w", newline="") as timestamp_file:
+                timestamp_writer = csv.writer(timestamp_file)
+                while not self._stop_event.is_set():
+                    ok, frame = capture.read()
+                    if not ok:
+                        raise RuntimeError(
+                            f"Camera {self.camera_index} stopped returning frames."
+                        )
+                    # Downstream matching localizes these local wall-clock values.
+                    timestamp = datetime.now().isoformat(timespec="microseconds")
+                    writer.write(frame)
+                    timestamp_writer.writerow([timestamp])
+                    if self.frame_callback and self.frame_count % self.preview_every == 0:
+                        self.frame_callback(self.camera_index, frame.copy())
+                    self.frame_count += 1
+        except Exception as error:  # Exposed to the GUI through ``error``.
+            self.error = error
+            self._stop_event.set()
+            self._started_event.set()
+        finally:
+            capture.release()
+            if writer is not None:
+                writer.release()
+
+
+# Backwards-compatible name used by older scripts in this repository.
+VideoCapture = VideoRecorder

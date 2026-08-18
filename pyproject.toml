@@ -7,7 +7,7 @@
   version = "0.1.0"
   description = "NDI-to-robot calibration tools"
   readme = "README.md"
-  requires-python = ">=3.12"
+  requires-python = ">=3.11, <3.12"
   dependencies = [
       "ndicapi==3.7.5",
       "numpy==1.26.4",
