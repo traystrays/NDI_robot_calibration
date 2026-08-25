@@ -1,4 +1,7 @@
-"""Attach a textured plane to the robot end effector and render it in video."""
+"""
+Attach a textured plane to the robot end effector and render it in video.
+Projection is based on end-effector position only. Does not use NDI position.
+"""
 
 import argparse
 from pathlib import Path

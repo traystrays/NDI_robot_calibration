@@ -173,7 +173,7 @@ def print_error_metrics(metrics: dict[str, float | int]) -> None:
 
 def main() :
     """Clean, match video frames, calibrate, and save the results."""
-    print(CONFIG_PATH)
+
     config = load_config()
     inputs = config["inputs"]
     si_config = config["si_arm"]
