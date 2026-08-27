@@ -24,17 +24,15 @@ except ModuleNotFoundError:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data" / "20260824_us"
-ECM_VIDEO = DATA_DIR / "ecm_left_20260824_134212.mp4"
-ECM_TIMESTAMPS = DATA_DIR / "ecm_left_20260824_134212_timestamps.txt"
-ULTRASOUND_VIDEO = DATA_DIR / "us_20260824_134212.mp4"
-ULTRASOUND_TIMESTAMPS = DATA_DIR / "us_20260824_134212_timestamps.txt"
-SI_CSV = DATA_DIR / "data_local_part_1_24_8_2026_13_42_21.csv"
-NDI_CSV = DATA_DIR / "ParticipantData24-08-2026_13-42-05.csv"
-IMAGE_TO_PROBE_FILE = (
-    PROJECT_ROOT / "data" / "20260824_data" / "image_to_probe_transform.npz"
-)
-NDI_TO_BASE_FILE = PROJECT_ROOT / "data" / "20260824_data" / "calib.npz"
+DATA_DIR = PROJECT_ROOT / "data" / "20260826_reproj"
+ECM_VIDEO = DATA_DIR / "ecm_left_20260826_142826.mp4"
+ECM_TIMESTAMPS = DATA_DIR / "ecm_left_20260826_142826_timestamps.txt"
+ULTRASOUND_VIDEO = DATA_DIR / "us_20260826_142826.mp4"
+ULTRASOUND_TIMESTAMPS = DATA_DIR / "us_20260826_142826_timestamps.txt"
+SI_CSV = DATA_DIR / "data_local_part_1_26_8_2026_14_25_58_use.csv"
+NDI_CSV = DATA_DIR / "ParticipantData26-08-2026_14-27-47.csv"
+IMAGE_TO_PROBE_FILE = DATA_DIR / "image_to_probe_transform(1).npz"
+NDI_TO_BASE_FILE = PROJECT_ROOT / "data" / "20260826_calib" / "calib.npz"
 ECM_TO_CAMERA_FILE = PROJECT_ROOT / "data" / "si_robot" / "hand_eye_0727_python.npz"
 CAMERA_PARAMETERS_FILE = PROJECT_ROOT / "data" / "si_robot" / "calib_intrinsics.npz"
 
@@ -43,11 +41,9 @@ CAMERA_PARAMETERS_FILE = PROJECT_ROOT / "data" / "si_robot" / "calib_intrinsics.
 PLUS_RAW_CLIP_ORIGIN = (180, 169)
 PLUS_RAW_CLIP_SIZE = (558, 727)
 
-# Pixel grid on which image_to_probe_transform.npz was calibrated. Its column
-# scales over 1280x720 produce approximately 42x50 mm, matching the measured
-# 43x50 mm ultrasound slice. This is independent of the display-only texture
-# crop used to remove the BK interface from the overlay.
-CALIBRATED_IMAGE_SIZE = (1280, 720)
+ULTRASOUND_PHYSICAL_SIZE_MM = (43.0, 50.0)
+ULTRASOUND_ROLL_DEG = -70.0
+ULTRASOUND_SCREEN_OFFSET_PX = (0.0, 100.0)
 
 # Full-screen BK recording. This is deliberately configurable at the CLI because
 # it is not the raw 558x727 Plus video stream described by ClipRectangleOrigin.
@@ -175,7 +171,7 @@ def synchronize_streams(
 
 def load_image_to_probe(
     npz_path: Path = IMAGE_TO_PROBE_FILE,
-    key: str = "image_to_probe",
+    key: str | None = None,
 ) -> np.ndarray:
     """Load the calibrated pixel-to-probe affine matrix from NPZ.
 
@@ -187,7 +183,16 @@ def load_image_to_probe(
     if not npz_path.is_file():
         raise FileNotFoundError(f"Image-to-probe file not found: {npz_path}")
     with np.load(npz_path, allow_pickle=False) as parameters:
-        if key not in parameters:
+        if key is None:
+            key = next(
+                (
+                    candidate
+                    for candidate in ("image_to_probe", "image_to_probe_transform")
+                    if candidate in parameters
+                ),
+                None,
+            )
+        if key is None or key not in parameters:
             raise KeyError(
                 f"{npz_path} has no {key!r}; available keys: {parameters.files}"
             )
@@ -201,22 +206,83 @@ def load_image_to_probe(
 
 def ultrasound_corners_in_probe(
     probe_T_image: np.ndarray,
-    image_size: tuple[int, int] = CALIBRATED_IMAGE_SIZE,
+    physical_size_mm: tuple[float, float] = ULTRASOUND_PHYSICAL_SIZE_MM,
 ) -> np.ndarray:
-    """Return TL, TR, BR, BL calibrated image corners in probe metres."""
-    width, height = image_size
-    image_corners = np.array(
+    """Return TL, TR, BR, BL slice corners in probe coordinates (metres).
+
+    The calibration supplies the image origin and lateral/depth directions.
+    The independently known physical slice size supplies their magnitudes.
+    """
+    matrix = np.asarray(probe_T_image, dtype=float)
+    width_mm, height_mm = physical_size_mm
+    lateral = matrix[:3, 0]
+    depth = matrix[:3, 1]
+    lateral_norm = np.linalg.norm(lateral)
+    depth_norm = np.linalg.norm(depth)
+    if lateral_norm <= 0 or depth_norm <= 0:
+        raise ValueError("Image-to-probe lateral/depth axes must be nonzero.")
+    origin = matrix[:3, 3]
+    width_vector = lateral / lateral_norm * width_mm
+    height_vector = depth / depth_norm * height_mm
+    corners_mm = np.array(
         [
-            [0, 0, 0, 1],
-            [width - 1, 0, 0, 1],
-            [width - 1, height - 1, 0, 1],
-            [0, height - 1, 0, 1],
-        ],
-        dtype=float,
+            origin,
+            origin + width_vector,
+            origin + width_vector + height_vector,
+            origin + height_vector,
+        ]
     )
-    # The saved calibration outputs millimetres; all other project transforms
-    # use metres.
-    return (np.asarray(probe_T_image) @ image_corners.T).T[:, :3] / 1000.0
+    return corners_mm / 1000.0
+
+
+def roll_slice_about_depth_axis(
+    corners: np.ndarray,
+    angle_degrees: float = ULTRASOUND_ROLL_DEG,
+) -> np.ndarray:
+    """Roll a slice around its own depth axis, keeping its origin fixed."""
+    points = np.asarray(corners, dtype=float)
+    if points.shape != (4, 3):
+        raise ValueError(f"Slice corners must have shape (4, 3); got {points.shape}.")
+    origin = points[0]
+    depth_axis = points[3] - origin
+    norm = np.linalg.norm(depth_axis)
+    if norm <= 0:
+        raise ValueError("Slice depth axis must be nonzero.")
+    x, y, z = depth_axis / norm
+    angle = np.deg2rad(angle_degrees)
+    cosine = np.cos(angle)
+    sine = np.sin(angle)
+    one_minus_cosine = 1.0 - cosine
+    rotation = np.array(
+        [
+            [
+                cosine + x * x * one_minus_cosine,
+                x * y * one_minus_cosine - z * sine,
+                x * z * one_minus_cosine + y * sine,
+            ],
+            [
+                y * x * one_minus_cosine + z * sine,
+                cosine + y * y * one_minus_cosine,
+                y * z * one_minus_cosine - x * sine,
+            ],
+            [
+                z * x * one_minus_cosine - y * sine,
+                z * y * one_minus_cosine + x * sine,
+                cosine + z * z * one_minus_cosine,
+            ],
+        ]
+    )
+    return origin + (rotation @ (points - origin).T).T
+
+
+def apply_screen_offset(
+    image_points: np.ndarray,
+    offset_px: tuple[float, float] = ULTRASOUND_SCREEN_OFFSET_PX,
+) -> np.ndarray:
+    """Apply the configured final ECM screen-space translation."""
+    return np.asarray(image_points, dtype=np.float32) + np.asarray(
+        offset_px, dtype=np.float32
+    )
 
 
 def project_ultrasound_corners(
@@ -323,7 +389,9 @@ def render_preview(
         ultrasound_capture.release()
 
     probe_T_image = load_image_to_probe()
-    corners = ultrasound_corners_in_probe(probe_T_image)
+    corners = roll_slice_about_depth_axis(
+        ultrasound_corners_in_probe(probe_T_image)
+    )
     destination = project_ultrasound_corners(
         row["base_T_ecm"],
         row["ndi_T_probe"],
@@ -332,6 +400,8 @@ def render_preview(
         corners,
         *load_camera_parameters(CAMERA_PARAMETERS_FILE),
     )
+    if destination is not None:
+        destination = apply_screen_offset(destination)
     status = "behind_camera"
     if destination is not None:
         overlaps = (
@@ -397,7 +467,9 @@ def write_overlay_video(
     ndi_T_base = load_npz_transform(NDI_TO_BASE_FILE, "ndi_T_base")
     ecm_T_camera = load_npz_transform(ECM_TO_CAMERA_FILE, "X")
     camera_matrix, distortion = load_camera_parameters(CAMERA_PARAMETERS_FILE)
-    probe_corners = ultrasound_corners_in_probe(load_image_to_probe())
+    probe_corners = roll_slice_about_depth_axis(
+        ultrasound_corners_in_probe(load_image_to_probe())
+    )
     statistics = {
         "processed": 0,
         "rendered": 0,
@@ -433,6 +505,8 @@ def write_overlay_video(
                 camera_matrix,
                 distortion,
             )
+            if destination is not None:
+                destination = apply_screen_offset(destination)
             if destination is None:
                 statistics["behind_camera"] += 1
             else:

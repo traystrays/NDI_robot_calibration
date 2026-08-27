@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "si_csv": "./data/20260824_ndi_calib/data_local_part_1_24_8_2026_12_31_36.csv",
-    "ndi_csv": "./data/20260824_ndi_calib/ParticipantData24-08-2026_12-31-43_localizing.csv",
+    "si_csv": "./data/20260826_calib/data_local_part_1_26_8_2026_15_14_26.csv",
+    "ndi_csv": "./data/20260826_calib/ParticipantData26-08-2026_15-14-12.csv",
     "si_robot_params": "./data/si_robot/hand_eye_0727_python.npz"
   },
   "video":{
-    "input": "./data/20260824_ndi_calib/video_stream_1_20260824_123123.mp4",
-    "timestamp": "./data/20260824_ndi_calib/video_stream_1_20260824_123123_timestamps.txt",
+    "input": "./data/20260826_calib/video_stream_1_20260826_151407.mp4",
+    "timestamp": "./data/20260826_calib/video_stream_1_20260826_151407_timestamps.txt",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -42,11 +42,11 @@
     "max_pairs": 600
   },
   "output": {
-    "calib_file": "./data/20260824_data/calib.npz",
-    "marker_mount_file": "./data/20260824_data/marker_mount.npz",
-    "marker_error_output": "./data/20260824_data/marker_prediction_errors.csv",
-    "match_output": "./data/20260824_data/matched_output.csv",
-    "selected_frames": "./data/20260824_data/selected_calibration_frames.csv"
+    "calib_file": "./data/20260826_calib/calib.npz",
+    "marker_mount_file": "./data/20260826_calib/marker_mount.npz",
+    "marker_error_output": "./data/20260826_calib/marker_prediction_errors.csv",
+    "match_output": "./data/20260826_calib/matched_output.csv",
+    "selected_frames": "./data/20260826_calib/selected_calibration_frames.csv"
   },
   "camera": {
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"
