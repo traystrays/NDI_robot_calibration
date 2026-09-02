@@ -126,7 +126,8 @@ def clean_si_data(
 
 def apply_transform(data: pd.DataFrame, old_name: str, new_name: str,transform:np.ndarray):
     """
-    Apply a 4x4 transformation to the named data column. Note this is specifically for directly transforming to a pd.DataFrame, not for general use.
+    Apply a 4x4 transformation to the named data column. 
+    Note this is specifically for directly transforming to a pd.DataFrame, not for general 4x4 transform use.
     """
     if old_name not in data.columns:
         raise ValueError(f"Column '{old_name}' not found in data.")

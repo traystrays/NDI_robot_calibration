@@ -24,15 +24,16 @@ except ModuleNotFoundError:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data" / "20260826_reproj"
-ECM_VIDEO = DATA_DIR / "ecm_left_20260826_142826.mp4"
-ECM_TIMESTAMPS = DATA_DIR / "ecm_left_20260826_142826_timestamps.txt"
-ULTRASOUND_VIDEO = DATA_DIR / "us_20260826_142826.mp4"
-ULTRASOUND_TIMESTAMPS = DATA_DIR / "us_20260826_142826_timestamps.txt"
-SI_CSV = DATA_DIR / "data_local_part_1_26_8_2026_14_25_58_use.csv"
-NDI_CSV = DATA_DIR / "ParticipantData26-08-2026_14-27-47.csv"
-IMAGE_TO_PROBE_FILE = DATA_DIR / "image_to_probe_transform(1).npz"
-NDI_TO_BASE_FILE = PROJECT_ROOT / "data" / "20260826_calib" / "calib.npz"
+INPUT_DATA_DIR = Path(r"D:\20260831_reproj")
+OUTPUT_DATA_DIR = PROJECT_ROOT / "data" / "20260831_reproj"
+ECM_VIDEO = INPUT_DATA_DIR / "ecm_left_20260831_115144.mp4"
+ECM_TIMESTAMPS = INPUT_DATA_DIR / "ecm_left_20260831_115144_timestamps.txt"
+ULTRASOUND_VIDEO = INPUT_DATA_DIR / "us_20260831_115144.mp4"
+ULTRASOUND_TIMESTAMPS = INPUT_DATA_DIR / "us_20260831_115144_timestamps.txt"
+SI_CSV = INPUT_DATA_DIR / "data_local_part_1_31_8_2026_11_52_4.csv"
+NDI_CSV = INPUT_DATA_DIR / "ParticipantData31-08-2026_11-51-56.csv"
+IMAGE_TO_PROBE_FILE = OUTPUT_DATA_DIR / "image_to_probe_transform.npz"
+NDI_TO_BASE_FILE = PROJECT_ROOT / "data" / "20260831_calib" / "calib.npz"
 ECM_TO_CAMERA_FILE = PROJECT_ROOT / "data" / "si_robot" / "hand_eye_0727_python.npz"
 CAMERA_PARAMETERS_FILE = PROJECT_ROOT / "data" / "si_robot" / "calib_intrinsics.npz"
 
@@ -42,8 +43,8 @@ PLUS_RAW_CLIP_ORIGIN = (180, 169)
 PLUS_RAW_CLIP_SIZE = (558, 727)
 
 ULTRASOUND_PHYSICAL_SIZE_MM = (43.0, 50.0)
-ULTRASOUND_ROLL_DEG = -70.0
-ULTRASOUND_SCREEN_OFFSET_PX = (0.0, 100.0)
+ULTRASOUND_ROLL_DEG = 0
+ULTRASOUND_SCREEN_OFFSET_PX = (0.0, 0.0)
 
 # Full-screen BK recording. This is deliberately configurable at the CLI because
 # it is not the raw 558x727 Plus video stream described by ClipRectangleOrigin.
@@ -540,6 +541,11 @@ def write_overlay_video(
                         ultrasound_current_frame,
                         roi,
                     )
+                    
+                    ultrasound_frame = cv2.rotate(
+                        ultrasound_frame,
+                        cv2.ROTATE_180,
+                    )
                     ecm_frame = overlay_slice(
                         ecm_frame,
                         ultrasound_frame,
@@ -589,17 +595,17 @@ def main() -> None:
     parser.add_argument(
         "--video-output",
         type=Path,
-        default=DATA_DIR / "ultrasound_on_ecm_overlay.mp4",
+        default=OUTPUT_DATA_DIR / "ultrasound_on_ecm_overlay.mp4",
     )
     parser.add_argument(
         "--preview-output",
         type=Path,
-        default=DATA_DIR / "ultrasound_overlay_preview.png",
+        default=OUTPUT_DATA_DIR / "ultrasound_overlay_preview.png",
     )
     parser.add_argument(
         "--matches-output",
         type=Path,
-        default=DATA_DIR / "ultrasound_ecm_matches.csv",
+        default=OUTPUT_DATA_DIR / "ultrasound_ecm_matches.csv",
     )
     parser.add_argument(
         "--roi",
