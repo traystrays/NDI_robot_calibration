@@ -6,7 +6,9 @@ Start DVPControl first, then run: python src/LiveData/robot_receiver.py
 import socket
 import struct
 import math
-
+import subprocess
+import time
+from pywinauto.application import Application
 
 # EpiLogger's DVAPI_MIP: float pos[3], float orientation[9], int type.
 # Three 52-byte records form the 156-byte pose packet on this Windows setup.
@@ -88,7 +90,19 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    exe_path = r"c:\Users\rcl\Documents\Linghao\eye_gaze_epilogger_2\DVPControl_precompiled\DVPControl.exe"
+    app = Application(backend="win32").start(exe_path)
+    time.sleep(5)
+    window = app.top_window()
+    
     try:
+        window = app.top_window()
+        window["NO"].click_input() 
+        print("Clicked 'NO' button to dismiss the dialog.")
+        
+        
+        
+
         main()
     except KeyboardInterrupt:
         print("\nStopped.")
