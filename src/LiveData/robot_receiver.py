@@ -9,6 +9,7 @@ import math
 import subprocess
 import time
 from pywinauto.application import Application
+import pyautogui
 
 # EpiLogger's DVAPI_MIP: float pos[3], float orientation[9], int type.
 # Three 52-byte records form the 156-byte pose packet on this Windows setup.
@@ -96,12 +97,19 @@ if __name__ == "__main__":
     window = app.top_window()
     
     try:
-        window = app.top_window()
         window["NO"].click_input() 
         print("Clicked 'NO' button to dismiss the dialog.")
         
+        time.sleep(1)
+        window = app.top_window()
+        window["Save SUJ"].click_input()
+        print("Clicked 'Save SUJ' button to save the SUJ file.")
         
-        
+        time.sleep(1)
+        pyautogui.keyDown('alt')
+        pyautogui.press('tab')
+        pyautogui.keyUp('alt')
+        time.sleep(5)
 
         main()
     except KeyboardInterrupt:
