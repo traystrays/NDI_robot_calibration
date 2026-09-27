@@ -37,11 +37,12 @@ NDI_TO_BASE_FILE = PROJECT_ROOT / "data" / "20260831_calib" / "calib.npz"
 ECM_TO_CAMERA_FILE = PROJECT_ROOT / "data" / "si_robot" / "hand_eye_0727_python.npz"
 CAMERA_PARAMETERS_FILE = PROJECT_ROOT / "data" / "si_robot" / "calib_intrinsics.npz"
 
-# Exact raw-video rectangle from the fCal XML:
+# HARDCODED: exact raw-video rectangle from the fCal XML:
 # ClipRectangleOrigin="180 169 0", ClipRectangleSize="558 727 1".
 PLUS_RAW_CLIP_ORIGIN = (180, 169)
 PLUS_RAW_CLIP_SIZE = (558, 727)
 
+# Could hardcode ultrasound 
 ULTRASOUND_PHYSICAL_SIZE_MM = (43.0, 50.0)
 ULTRASOUND_ROLL_DEG = 0
 ULTRASOUND_SCREEN_OFFSET_PX = (0.0, 0.0)
@@ -89,12 +90,12 @@ def crop_recorded_ultrasound_frame(
 def _nearest_join(
     frames: pd.DataFrame,
     samples: pd.DataFrame,
-    *,
+    *, # keyword only arguments
     sample_time: str,
     value_column: str,
     output_column: str,
     tolerance: str | pd.Timedelta,
-) -> pd.DataFrame:
+) -> pd.DataFrame:  
     """Attach the nearest sample and its signed timing error to frame rows."""
     frames = frames.copy()
     frames["ecm_video_timestamp"] = pd.to_datetime(
