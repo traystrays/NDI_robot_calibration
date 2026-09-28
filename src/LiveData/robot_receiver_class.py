@@ -1,4 +1,5 @@
-"""Receive DVPControl poses into a thread-safe history, or print them directly.
+"""
+Receive DVPControl poses into a thread-safe history, or print them directly.
 
 Start DVPControl first, then run: python src/LiveData/robot_receiver.py
 """
@@ -13,7 +14,7 @@ import threading
 
 # EpiLogger's DVAPI_MIP: float pos[3], float orientation[9], int type.
 # Three 52-byte records form the 156-byte pose packet on this Windows setup.
-POSE_RECORD = struct.Struct("<12fi")
+POSE_RECORD = struct.Struct("<12fi") # < little-endian, 12 floats, 1 int
 MANIPULATORS = {0: "PSM1", 1: "PSM2", 2: "ECM"}
 
 
@@ -37,13 +38,13 @@ def decode_poses(data: bytes) -> list[tuple[int, tuple[float, ...]]]:
 
 
 @dataclass(frozen=True)
-class PoseSample:
+class PosePacket:
     """One immutable packet; timestamps describe local receipt, not robot capture."""
 
     sequence: int
     monotonic_ns: int
     received_at_us: int
-    poses: tuple[tuple[int, tuple[float, ...]], ...]
+    poses: tuple[tuple[int, tuple[float, ...]], ...] # describes structure 
     sender: tuple[str, int]
 
 
@@ -73,7 +74,7 @@ class RobotReceiver:
             raise RuntimeError("Call stop() before starting the receiver again")
         receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            receiver.bind(("127.0.0.1", 0))
+            receiver.bind(("127.0.0.1", 0)) # bind to any available port
             receiver.settimeout(0.2)  # Allows stop() to join the worker promptly.
             self.receiver_port = receiver.getsockname()[1]
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as registration:
@@ -116,7 +117,7 @@ class RobotReceiver:
                         self._invalid_packets += 1
                     continue
                 sequence += 1
-                sample = PoseSample(sequence, monotonic_ns, received_at_us, poses, sender)
+                sample = PosePacket(sequence, monotonic_ns, received_at_us, poses, sender) # packafe into PosePacket
                 # Never hold the lock while waiting for a packet or decoding it.
                 with self._lock:
                     self._buffer.append(sample)
@@ -127,7 +128,7 @@ class RobotReceiver:
             receiver.close()
 
     def latest(self):
-        """Return the newest sample or None. It may be stale; check its timestamp."""
+        """Return the newest sample or None. It could have been old because publisher stoppped awhile ago; check its timestamp."""
         with self._lock:
             return self._buffer[-1] if self._buffer else None
 

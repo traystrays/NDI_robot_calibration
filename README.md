@@ -33,3 +33,12 @@ The video timestamp files retain the one-timestamp-per-line format consumed by
 the calibration and frame-selection tools.
 
 Adding data collection for NDI as well
+
+### Implementation
+TODO: run matching videos twice, verify data pipeline
+TODO: incorporate a NDI to pixel transform, and build reprojection pipline of that 
+### Live synchronized ultrasound overlay
+
+Run `python scripts/live_ultrasound_overlay.py --demo` for a hardware-free demo.
+For device configuration, timestamp semantics, architecture, and step-by-step
+hardware checks, see [the live overlay guide](scripts/LIVE_OVERLAY.md).

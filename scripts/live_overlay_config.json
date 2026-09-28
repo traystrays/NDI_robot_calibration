@@ -1,0 +1,59 @@
+{
+  "video": {
+    "ecm_camera": 0,
+    "ultrasound_camera": 1,
+    "ecm_resolution": [
+      1280,
+      720
+    ],
+    "ultrasound_resolution": [
+      1280,
+      720
+    ],
+    "fps": 30,
+    "backend": "any",
+    "ecm_latency_ms": 0,
+    "ultrasound_latency_ms": 0
+  },
+  "ndi": {
+    "rom_path": "../NDI_video_logger/src/marker/tooltip_marker.rom",
+    "serial_port": "COM3",
+    "tracker_type": "polaris",
+    "tool_index": 0,
+    "latency_ms": 0
+  },
+  "robot": {
+    "host": "127.0.0.1",
+    "port": 60000,
+    "latency_ms": 0
+  },
+  "synchronization": {
+    "tolerances_ms": [
+      20,
+      20,
+      40
+    ],
+    "wait_ms": 60,
+    "max_age_ms": 250
+  },
+  "overlay": {
+    "image_to_probe": "data/20260831_reproj/image_to_probe_transform.npz",
+    "ndi_to_base": "data/20260831_calib/calib.npz",
+    "ecm_to_camera": "data/si_robot/hand_eye_0727_python.npz",
+    "camera_parameters": "data/si_robot/calib_intrinsics.npz",
+    "calibration_resolution": null,
+    "roi": [
+      500,
+      0,
+      620,
+      580
+    ],
+    "physical_size_mm": [
+      43,
+      50
+    ],
+    "rotate_180": true,
+    "roll_deg": 0,
+    "opacity": 0.65
+  }
+}
