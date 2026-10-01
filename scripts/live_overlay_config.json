@@ -3,12 +3,12 @@
     "ecm_camera": 0,
     "ultrasound_camera": 1,
     "ecm_resolution": [
-      1280,
-      720
+      1080,
+      1920
     ],
     "ultrasound_resolution": [
-      1280,
-      720
+      1920,
+      1080
     ],
     "fps": 30,
     "backend": "any",
@@ -17,7 +17,7 @@
   },
   "ndi": {
     "rom_path": "../NDI_video_logger/src/marker/tooltip_marker.rom",
-    "serial_port": "COM3",
+    "serial_port": "COM7",
     "tracker_type": "polaris",
     "tool_index": 0,
     "latency_ms": 0
@@ -41,7 +41,10 @@
     "ndi_to_base": "data/20260831_calib/calib.npz",
     "ecm_to_camera": "data/si_robot/hand_eye_0727_python.npz",
     "camera_parameters": "data/si_robot/calib_intrinsics.npz",
-    "calibration_resolution": null,
+    "calibration_resolution": [
+      1080,
+      1920
+    ],
     "roi": [
       500,
       0,
