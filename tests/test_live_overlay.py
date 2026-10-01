@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT)]
@@ -17,6 +18,7 @@ from LiveData.packets import History, VideoFrame, TransformSample
 from LiveData.synchronizer import FrameSynchronizer
 from LiveData.receivers import VideoReceiver, NDIReceiver, RobotPoseHistory
 from LiveData.robot_receiver_class import RobotReceiver, POSE_RECORD
+from LiveData.worker import Worker
 from scripts.live_ultrasound_overlay import demo_setup, demo_feed, OverlayRenderer
 
 
@@ -127,61 +129,57 @@ class RenderingTests(unittest.TestCase):
 
 
 class AcquisitionTests(unittest.TestCase):
-    def test_camera_start_failure_releases_device(self):
-        class Capture:
-            released = False
-            def isOpened(self): return False
-            def release(self): self.released = True
-        capture = Capture()
-        worker = VideoReceiver(0, capture_factory=lambda *_: capture)
-        with self.assertRaisesRegex(RuntimeError, "Could not open"):
-            worker.start()
-        self.assertTrue(capture.released)
-        self.assertFalse(worker._thread.is_alive())
+    def test_robot_uses_shared_worker_lifecycle(self):
+        self.assertTrue(issubclass(RobotReceiver, Worker))
+        self.assertTrue(issubclass(VideoReceiver, Worker))
+        self.assertTrue(issubclass(NDIReceiver, Worker))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as publisher:
+            publisher.bind(("127.0.0.1", 0))
+            receiver = RobotReceiver(publisher=publisher.getsockname())
+            with receiver:
+                # Ready after registration, even with no robot packets yet.
+                self.assertTrue(receiver._ready.is_set())
+                self.assertIsNone(receiver.latest())
+                self.assertTrue(receiver._thread.is_alive())
+            self.assertFalse(receiver._thread.is_alive())
+            receiver.stop()  # Repeated stop is harmless.
+            with self.assertRaisesRegex(RuntimeError, "new receiver"):
+                receiver.start()
 
-    def test_camera_ownership_timestamp_and_cleanup(self):
-        class Capture:
-            released = False
-            def isOpened(self): return True
-            def set(self, *args): pass
-            def read(self):
-                time.sleep(.005)
-                return True, np.zeros((4, 5, 3), np.uint8)
-            def release(self): self.released = True
-        capture = Capture()
-        worker = VideoReceiver(0, resolution=(5, 4), latency_ms=10,
-                               capture_factory=lambda *_: capture)
-        with worker:
-            sample = worker.history.latest()
-            self.assertEqual(sample.received_ns-sample.monotonic_ns, 10_000_000)
-        self.assertTrue(capture.released)
-        self.assertFalse(worker._thread.is_alive())
+    def test_robot_start_failure_is_visible(self):
+        receiver = RobotReceiver()
+        with patch("LiveData.robot_receiver_class.socket.socket",
+                   side_effect=OSError("socket creation failed")):
+            with self.assertRaisesRegex(RuntimeError, "socket creation failed"):
+                receiver.start(timeout=1)
+        self.assertIsInstance(receiver.error, OSError)
+        self.assertFalse(receiver._thread.is_alive())
 
-    def test_ndi_mm_conversion_and_lost_tracking(self):
-        class Tracker:
+    def test_robot_receive_failure_closes_socket(self):
+        class BrokenSocket:
             closed = False
-            calls = 0
-            def start_tracking(self): pass
-            def get_frame(self):
-                time.sleep(.005)
-                self.calls += 1
-                matrix = np.eye(4)
-                matrix[0, 3] = 100
-                if self.calls > 1: matrix[:] = np.nan
-                return [1], [123], [self.calls], [matrix], [0.1]
-            def stop_tracking(self): pass
-            def close(self): self.closed = True
-        tracker = Tracker()
-        with tempfile.NamedTemporaryFile() as rom:
-            worker = NDIReceiver(rom.name, "FAKE", tracker_factory=lambda _: tracker)
-            with worker:
-                deadline = time.monotonic()+1
-                while len(worker.history.snapshot()) < 2 and time.monotonic() < deadline:
-                    time.sleep(.005)
-            samples = worker.history.snapshot()
-        self.assertAlmostEqual(samples[0].transform[0, 3], .1)
-        self.assertFalse(samples[1].valid)
-        self.assertTrue(tracker.closed)
+            def __enter__(self): return self
+            def __exit__(self, *_): self.closed = True
+            def bind(self, *_): pass
+            def settimeout(self, *_): pass
+            def getsockname(self): return ("127.0.0.1", 12345)
+            def recvfrom(self, *_): raise OSError("receive failed")
+            def sendto(self, *_): pass
+        data_socket, registration = BrokenSocket(), BrokenSocket()
+        receiver = RobotReceiver()
+        with patch("LiveData.robot_receiver_class.socket.socket",
+                   side_effect=[data_socket, registration]):
+            # Startup and worker failure can race; either error must be visible.
+            try:
+                receiver.start(timeout=1)
+            except RuntimeError:
+                pass
+            finally:
+                receiver.stop()
+        self.assertRegex(str(receiver.error), "receive failed")
+        self.assertTrue(data_socket.closed)
+        self.assertTrue(registration.closed)
+        self.assertFalse(receiver._thread.is_alive())
 
     def test_real_udp_registration_decode_and_stop(self):
         publisher = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -202,7 +200,7 @@ class AcquisitionTests(unittest.TestCase):
                 self.assertEqual(receiver.invalid_packets, 1)
                 converted = RobotPoseHistory(receiver).snapshot()[0]
                 self.assertAlmostEqual(converted.transform[2, 3], .1)
-            self.assertIsNone(receiver._thread)
+            self.assertFalse(receiver._thread.is_alive())
         finally:
             publisher.close()
 

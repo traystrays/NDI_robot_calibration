@@ -1,4 +1,5 @@
-"""Receive and print DVPControl's local UDP pose stream.
+"""
+Receive and print DVPControl's local UDP pose stream.
 
 Start DVPControl first, then run: python src/LiveData/robot_receiver.py
 """

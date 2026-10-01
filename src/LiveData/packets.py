@@ -1,4 +1,5 @@
-"""Owned, immutable packets and bounded histories for local live acquisition.
+"""
+Owned, immutable packets and bounded histories for local live acquisition.
 
 All matching timestamps are host monotonic nanoseconds. ``received_ns`` is
 preserved separately from a configurable latency-corrected ``monotonic_ns``.
@@ -18,7 +19,7 @@ def immutable_array(value):
     array = np.ascontiguousarray(value)
     return np.frombuffer(array.tobytes(), dtype=array.dtype).reshape(array.shape)
 
-
+# Immutable packets of Video Frame
 @dataclass(frozen=True, eq=False)
 class VideoFrame:
     sequence: int
@@ -32,7 +33,7 @@ class VideoFrame:
             raise ValueError("VideoFrame requires a uint8 BGR image")
         object.__setattr__(self, "image", immutable_array(image))
 
-
+# Immutable packets of Transforms, for NDI and robot 
 @dataclass(frozen=True, eq=False)
 class TransformSample:
     sequence: int
