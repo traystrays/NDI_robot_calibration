@@ -116,47 +116,59 @@ def demo_feed(histories, sequence, now):
 def run(args):
     if args.seconds is not None and (not np.isfinite(args.seconds) or args.seconds <= 0):
         raise ValueError("--seconds must be finite and positive")
-    with ExitStack() as stack:
+    with ExitStack() as stack: # keeps track of the cleanup
         workers = []
         if args.demo:
             histories = [History(30) for _ in range(4)]
             renderer = demo_setup()
             timing = {}
         else:
-            if args.config is None:
+            if args.config is None: # needs an input
                 raise ValueError("Supply --config scripts/live_overlay_config.json or --demo")
             config = json.loads(args.config.read_text())
-            renderer = OverlayRenderer.from_config(config["overlay"])
+            renderer = OverlayRenderer.from_config(config["overlay"]) # info for overlay
             video = config["video"]
+
             if video["ecm_camera"] == video["ultrasound_camera"]:
                 raise ValueError("ECM and ultrasound must use different capture devices")
+            
             if tuple(video["ecm_resolution"]) != renderer.resolution:
                 raise ValueError("ECM capture resolution must equal calibration_resolution")
+            
             backend = {"any": cv2.CAP_ANY, "dshow": cv2.CAP_DSHOW,
-                       "msmf": cv2.CAP_MSMF, "avfoundation": cv2.CAP_AVFOUNDATION}[video.get("backend", "any")]
+                       "msmf": cv2.CAP_MSMF, "avfoundation": cv2.CAP_AVFOUNDATION}[video.get("backend", "any")] # how openCV access the camera
             cameras = []
+
             for name in ("ecm", "ultrasound"):
                 camera = VideoReceiver(video[name+"_camera"], resolution=video[name+"_resolution"],
                                        fps=video.get("fps", 30), backend=backend,
                                        latency_ms=video.get(name+"_latency_ms", 0))
-                cameras.append(stack.enter_context(camera))
+                live_cam = stack.enter_context(camera)
+                cameras.append(live_cam)
+
             ndi_config = dict(config["ndi"])
             rom = Path(ndi_config["rom_path"])
             ndi_config["rom_path"] = str(rom if rom.is_absolute() else ROOT / rom)
-            ndi = stack.enter_context(NDIReceiver(**ndi_config))
-            robot_config = config.get("robot", {})
+
+            ndi = stack.enter_context(NDIReceiver(**ndi_config)) # init ndi receiver
+
+            robot_config = config.get("robot", {}) # if that key is mising use empty
             robot = stack.enter_context(RobotReceiver(
                 publisher=(robot_config.get("host", "127.0.0.1"), robot_config.get("port", 60000))))
             workers = [*cameras, ndi, robot]
             histories = [cameras[0].history, cameras[1].history,
                          RobotPoseHistory(robot, robot_config.get("latency_ms", 0)), ndi.history]
             timing = config.get("synchronization", {})
+
         sync = FrameSynchronizer(*histories, **timing)
+
         if args.check_config:
             print("Configuration loaded and devices opened successfully")
             return
         args.log.parent.mkdir(parents=True, exist_ok=True)
+
         log = stack.enter_context(args.log.open("w", newline=""))
+
         csv_writer = csv.writer(log)
         csv_writer.writerow(["ecm_sequence", "ecm_time_ns", "us_sequence", "robot_sequence", "ndi_sequence",
                              "us_time_ns", "robot_time_ns", "ndi_time_ns", "us_dt_ms", "robot_dt_ms", "ndi_dt_ms",
@@ -193,16 +205,19 @@ def run(args):
                 image, status = renderer.render(bundle)
                 rendered += status == "rendered"
                 samples = (bundle.ultrasound, bundle.robot, bundle.ndi)
+
                 csv_writer.writerow([bundle.ecm.sequence, bundle.ecm.monotonic_ns,
                     *[s.sequence if s else "" for s in samples],
                     *[s.monotonic_ns if s else "" for s in samples], *bundle.errors_ms,
                     (time.monotonic_ns()-bundle.ecm.monotonic_ns)/1e6, status])
-                log.flush()
+                
+                log.flush() # push buffered CSV from python to disk; OS may still buffer it
                 if writer:
                     writer.write(image)
                 if not args.headless:
                     cv2.imshow("Live ultrasound overlay", image)
                 last_display_ns = now
+
             # Never leave a frozen, apparently live overlay visible after input loss.
             if not args.headless and (not last_display_ns or now-last_display_ns > sync.max_age_ns):
                 blank = np.zeros((renderer.resolution[1], renderer.resolution[0], 3), np.uint8)
