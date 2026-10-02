@@ -23,6 +23,7 @@ from LiveData.packets import History, VideoFrame, TransformSample
 from LiveData.receivers import VideoReceiver, NDIReceiver, RobotPoseHistory
 from LiveData.robot_receiver_class import RobotReceiver
 from LiveData.synchronizer import FrameSynchronizer
+from LiveData.overlay_gui import OverlayGUI
 from scripts.reproject_ultrasound import (
     load_image_to_probe, load_npz_transform, load_camera_parameters,
     ultrasound_corners_in_probe, roll_slice_about_depth_axis,
@@ -186,6 +187,7 @@ def run(args):
     display_scale = 3.0
     with ExitStack() as stack: # keeps track of the cleanup
         workers = []
+        robot = None
         if args.demo:
             histories = [History(30) for _ in range(4)]
             renderer = demo_setup()
@@ -257,14 +259,12 @@ def run(args):
             if not writer.isOpened():
                 raise RuntimeError(f"Cannot open output {args.output}")
             stack.callback(writer.release)
+        gui = None
         if not args.headless:
-            cv2.namedWindow("Live ultrasound overlay", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(
-                "Live ultrasound overlay",
-                round(renderer.resolution[0] * display_scale),
-                round(renderer.resolution[1] * display_scale),
-            )
-            stack.callback(cv2.destroyAllWindows)
+            gui = OverlayGUI(renderer.resolution, display_scale)
+            stack.callback(gui.close)
+        display_image = None
+        last_gui_ns = 0
         started = time.monotonic()
         last_display_ns = 0
         last_report = started
@@ -295,21 +295,20 @@ def run(args):
                 log.flush() # push buffered CSV from python to disk; OS may still buffer it
                 if writer:
                     writer.write(image)
-                if not args.headless:
-                    cv2.imshow("Live ultrasound overlay", image)
+                display_image = image
                 last_display_ns = now
 
-            # Never leave a frozen, apparently live overlay visible after input loss.
-            if not args.headless and (not last_display_ns or now-last_display_ns > sync.max_age_ns):
-                blank = np.zeros((renderer.resolution[1], renderer.resolution[0], 3), np.uint8)
-                cv2.putText(blank, "WAITING / STALE: no current synchronized video", (15, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, .6, (0, 0, 255), 1)
-                cv2.imshow("Live ultrasound overlay", blank)
-            if not args.headless:
-                if cv2.waitKey(1) & 0xff in (27, ord("q")):
+            if gui is not None and now-last_gui_ns >= 33_000_000:
+                current_overlay = display_image
+                if not last_display_ns or now-last_display_ns > sync.max_age_ns:
+                    current_overlay = None
+                if not gui.update(
+                        current_overlay, ecm=histories[0].latest(),
+                        ultrasound=histories[1].latest(),
+                        robot=robot.latest() if robot is not None else None,
+                        ndi=histories[3].latest(), now_ns=now, max_age_ns=sync.max_age_ns):
                     break
-                if cv2.getWindowProperty("Live ultrasound overlay", cv2.WND_PROP_VISIBLE) < 1:
-                    break
+                last_gui_ns = now
             if time.monotonic()-last_report >= 1:
                 print(f"matched={sync.matched} unmatched={sync.unmatched} dropped={sync.dropped} rendered={rendered}", flush=True)
                 last_report = time.monotonic()

@@ -5,6 +5,15 @@ and synchronization live in `src/LiveData`. This renders the tracked ultrasound
 slice on **left ECM video**, using the geometry from `reproject_ultrasound.py`.
 The right stereo camera is not needed by that projection and is not opened.
 
+The window layout is defined in `src/LiveData/overlay_gui.py`. The large left
+panel shows the time-matched overlay. The right column shows the latest raw ECM
+and ultrasound feeds, ECM/PSM1/PSM2 positions in metres and row-major rotation
+matrices, and the probe position in NDI tracker coordinates. Sidebar data is
+latest available data, not the synchronized bundle. Missing, stale, or invalid
+samples are labeled and their values hidden. Images retain their aspect ratio.
+Press Q or Escape, or close the window, to stop. `--headless` skips the dashboard;
+the optional MP4 still records only the overlay image.
+
 ## What was built
 
 ```text
