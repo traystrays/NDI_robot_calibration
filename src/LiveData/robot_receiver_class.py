@@ -1,7 +1,7 @@
 """
 Receive DVPControl poses into a thread-safe history, or print them directly.
 
-Start DVPControl first, then run: python src/LiveData/robot_receiver.py
+Start DVPControl first, then run: python src/LiveData/robot_receiver_class.py
 """
 
 import socket
@@ -11,6 +11,9 @@ import time
 from collections import deque
 from dataclasses import dataclass
 import threading
+
+if __package__:
+    from .worker import Worker
 
 # EpiLogger's DVAPI_MIP: float pos[3], float orientation[9], int type.
 # Three 52-byte records form the 156-byte pose packet on this Windows setup.
@@ -48,23 +51,22 @@ class PosePacket:
     sender: tuple[str, int]
 
 
-class RobotReceiver:
+class RobotReceiver(Worker):
     """Receive on a worker thread; read bounded history from the application thread.
 
-    Call start()/stop() from the application thread. Data access methods are
-    thread-safe. Restart after restarting DVPControl to register again.
+    Uses the same one-use Worker lifecycle as camera and NDI acquisition.
+    Data access methods are thread-safe. Create a new receiver after restarting
+    DVPControl to register again. Readiness means registration was sent, not
+    that the publisher has acknowledged or delivered a measurement.
     """
 
     def __init__(self, publisher=("127.0.0.1", 60000), buffer_size=300):
         if buffer_size <= 0:
             raise ValueError("buffer_size must be positive")
+        super().__init__("robot-udp")
         self.publisher = publisher
         self._buffer = deque(maxlen=buffer_size)
         self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread = None
-        self._socket = None
-        self._error = None
         self._invalid_packets = 0
         self.receiver_port = None
 
@@ -135,11 +137,6 @@ class RobotReceiver:
                 # Never hold the lock while waiting for a packet or decoding it.
                 with self._lock:
                     self._buffer.append(sample)
-        except OSError as error:
-            with self._lock:
-                self._error = str(error)
-        finally:
-            receiver.close()
 
     def latest(self):
         """Return the newest sample or None. It could have been old because publisher stoppped awhile ago; check its timestamp."""
@@ -167,29 +164,10 @@ class RobotReceiver:
         return sample
 
     @property
-    def error(self):
-        """Socket failure, if any; a failed worker must be stopped before restart."""
-        with self._lock:
-            return self._error
-
-    @property
     def invalid_packets(self):
         with self._lock:
             return self._invalid_packets
 
-    def stop(self):
-        """Wait for the receive worker to exit and close its socket."""
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join()
-            self._thread = None
-            self._socket = None
-
-    def __enter__(self):
-        return self.start()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.stop()
 
 
 def main() -> None:
