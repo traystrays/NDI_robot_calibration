@@ -137,6 +137,10 @@ class RobotReceiver(Worker):
                 # Never hold the lock while waiting for a packet or decoding it.
                 with self._lock:
                     self._buffer.append(sample)
+        except Exception as error:
+            self.error = error
+        finally:
+            receiver.close()
 
     def latest(self):
         """Return the newest sample or None. It could have been old because publisher stoppped awhile ago; check its timestamp."""
