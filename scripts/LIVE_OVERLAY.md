@@ -148,14 +148,19 @@ Edit `scripts/live_overlay_config.json`:
    `[500,0,620,580]` and 180-degree rotation reproduce the offline **video** path.
    The offline preview path differs in rotation. For a raw Plus stream, specify
    its actual crop (the old raw XML used `[180,169,558,727]`) and valid input size.
-6. Start DVPControl on this computer before starting the overlay. The existing
-   robot receiver binds to loopback; changing the publisher host does not make
-   remote-computer acquisition supported. Default publisher port is 60000.
+6. Set `robot.dvpcontrol_exe` to the DVPControl executable. The overlay script
+   launches DVPControl, dismisses the `NO` dialog, selects `Save SUJ`, and waits
+   for startup before opening the cameras and trackers. The robot receiver also
+   retries registration while packets are absent. It binds to loopback; changing
+   the publisher host does not enable remote-computer acquisition. The default
+   publisher port is 60000.
 7. Stop the video logger/preview before starting this app: each hardware device
    needs one owner. This implementation directly opens the same capture/tracker
    interfaces; it does not read the logger's files or consume its preview callbacks.
 
-Run a startup check (opens and closes hardware; does not prove packet flow):
+Run a startup check. It opens the hardware and requires at least one valid robot
+and NDI pose within `synchronization.startup_timeout_s`; failures identify which
+tracking source is absent or invalid:
 
 ```bash
 python scripts/live_ultrasound_overlay.py --config scripts/live_overlay_config.json --check-config

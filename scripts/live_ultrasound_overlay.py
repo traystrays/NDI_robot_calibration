@@ -11,6 +11,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+DVP_CONTROL_EXE = Path(
+    r"c:\Users\rcl\Documents\Linghao\eye_gaze_epilogger_2\DVPControl_precompiled\DVPControl.exe"
+)
 sys.path.insert(0, str(ROOT))
 
 import cv2
@@ -113,9 +116,74 @@ def demo_feed(histories, sequence, now):
     ndi.append(TransformSample(sequence, t+3_000_000, t+3_000_000, pose))
 
 
+def wait_for_tracking(robot_history, ndi_history, robot_receiver, timeout_s):
+    """Require valid live tracking before entering the display loop."""
+    if not np.isfinite(timeout_s) or timeout_s <= 0:
+        raise ValueError("synchronization.startup_timeout_s must be finite and positive")
+    deadline = time.monotonic() + timeout_s
+    robot_samples = ndi_samples = ()
+    while time.monotonic() < deadline:
+        if robot_receiver.error is not None:
+            raise RuntimeError(f"Robot receiver failed: {robot_receiver.error}")
+        robot_samples = robot_history.snapshot()
+        ndi_samples = ndi_history.snapshot()
+        if any(sample.valid for sample in robot_samples) and any(
+                sample.valid for sample in ndi_samples):
+            return
+        time.sleep(.01)
+
+    failures = []
+    if not robot_samples:
+        failures.append(
+            "no robot packets received from DVPControl at "
+            f"{robot_receiver.publisher[0]}:{robot_receiver.publisher[1]} "
+            f"(invalid UDP packets: {robot_receiver.invalid_packets})"
+        )
+    elif not any(sample.valid for sample in robot_samples):
+        failures.append(f"robot pose invalid: {robot_samples[-1].reason}")
+    if not ndi_samples:
+        failures.append("no NDI measurements received")
+    elif not any(sample.valid for sample in ndi_samples):
+        failures.append(f"NDI pose invalid: {ndi_samples[-1].reason}")
+    raise RuntimeError("Tracking startup failed: " + "; ".join(failures))
+
+
+def start_dvpcontrol(executable=DVP_CONTROL_EXE):
+    """Launch and prepare DVPControl before opening any overlay hardware."""
+    try:
+        from pywinauto.application import Application
+        import pyautogui
+
+        executable = Path(executable)
+        if not executable.is_file():
+            raise FileNotFoundError(executable)
+        app = Application(backend="win32").start(str(executable))
+        time.sleep(1)
+        window = app.top_window()
+        window["NO"].click_input()
+        print("Clicked 'NO' button to dismiss the dialog.")
+
+        time.sleep(1)
+        window = app.top_window()
+        window["Save SUJ"].click_input()
+        print("Clicked 'Save SUJ' button to save the SUJ file.")
+
+        time.sleep(1)
+        pyautogui.keyDown("alt")
+        try:
+            pyautogui.press("tab")
+        finally:
+            pyautogui.keyUp("alt")
+        time.sleep(5)
+        return app
+    except Exception as error:
+        raise RuntimeError(f"DVPControl startup failed: {error}") from error
+
+
 def run(args):
     if args.seconds is not None and (not np.isfinite(args.seconds) or args.seconds <= 0):
         raise ValueError("--seconds must be finite and positive")
+    display_scale = 3.0
     with ExitStack() as stack: # keeps track of the cleanup
         workers = []
         if args.demo:
@@ -126,8 +194,14 @@ def run(args):
             if args.config is None: # needs an input
                 raise ValueError("Supply --config scripts/live_overlay_config.json or --demo")
             config = json.loads(args.config.read_text())
+            robot_config = config.get("robot", {}) # if that key is missing use empty
+            dvpcontrol = start_dvpcontrol(
+                robot_config.get("dvpcontrol_exe", DVP_CONTROL_EXE))
             renderer = OverlayRenderer.from_config(config["overlay"]) # info for overlay
             video = config["video"]
+            display_scale = float(video.get("display_scale", display_scale))
+            if not np.isfinite(display_scale) or display_scale <= 0:
+                raise ValueError("video.display_scale must be finite and positive")
 
             if video["ecm_camera"] == video["ultrasound_camera"]:
                 raise ValueError("ECM and ultrasound must use different capture devices")
@@ -152,13 +226,15 @@ def run(args):
 
             ndi = stack.enter_context(NDIReceiver(**ndi_config)) # init ndi receiver
 
-            robot_config = config.get("robot", {}) # if that key is mising use empty
             robot = stack.enter_context(RobotReceiver(
                 publisher=(robot_config.get("host", "127.0.0.1"), robot_config.get("port", 60000))))
+            robot_history = RobotPoseHistory(robot, robot_config.get("latency_ms", 0))
             workers = [*cameras, ndi, robot]
             histories = [cameras[0].history, cameras[1].history,
-                         RobotPoseHistory(robot, robot_config.get("latency_ms", 0)), ndi.history]
+                         robot_history, ndi.history]
             timing = config.get("synchronization", {})
+            startup_timeout_s = timing.pop("startup_timeout_s", 5)
+            wait_for_tracking(robot_history, ndi.history, robot, startup_timeout_s)
 
         sync = FrameSynchronizer(*histories, **timing)
 
@@ -183,6 +259,11 @@ def run(args):
             stack.callback(writer.release)
         if not args.headless:
             cv2.namedWindow("Live ultrasound overlay", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(
+                "Live ultrasound overlay",
+                round(renderer.resolution[0] * display_scale),
+                round(renderer.resolution[1] * display_scale),
+            )
             stack.callback(cv2.destroyAllWindows)
         started = time.monotonic()
         last_display_ns = 0
@@ -246,7 +327,8 @@ def main():
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--output", type=Path, help="Optional constant-30-fps preview MP4; use CSV for actual timing")
     parser.add_argument("--log", type=Path, default=ROOT / "data/live_overlay_timing.csv")
-    parser.add_argument("--check-config", action="store_true", help="Load calibration and open/close devices")
+    parser.add_argument("--check-config", action="store_true",
+                        help="Load calibration and require valid robot/NDI input")
     args = parser.parse_args()
     try:
         run(args)
