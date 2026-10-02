@@ -93,7 +93,7 @@ def main() -> None:
 if __name__ == "__main__":
     exe_path = r"c:\Users\rcl\Documents\Linghao\eye_gaze_epilogger_2\DVPControl_precompiled\DVPControl.exe"
     app = Application(backend="win32").start(exe_path)
-    time.sleep(5)
+    time.sleep(1)
     window = app.top_window()
     
     try:

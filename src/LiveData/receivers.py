@@ -129,7 +129,6 @@ class NDIReceiver(Worker):
             while not self._stop.is_set():
                 frame = tracker.get_frame()
                 receipt = time.monotonic_ns()
-                sequence += 1
                 source_frame = None
                 tracking_quality = None
                 try:
@@ -137,16 +136,21 @@ class NDIReceiver(Worker):
                     source_frame = int(numbers[self.tool_index])
                     tracking_quality = float(quality[self.tool_index])
                     if source_frame == previous_frame:
-                        raise ValueError("Repeated NDI device frame; no new measurement")
+                        # get_frame() can return the most recent device frame faster
+                        # than the tracker produces new measurements.  A duplicate is
+                        # not a failed measurement and must not replace the latest
+                        # valid pose with an artificial ``ndi_invalid`` sample.
+                        continue
                     transform = np.asarray(tracking[self.tool_index], dtype=float).copy()
                     transform[:3, 3] *= 0.001  # NDI mm -> common metres.
                     if not np.isfinite(np.asarray(quality[self.tool_index], dtype=float)).all():
                         raise ValueError("Nonfinite tracking quality")
-                    sample = TransformSample(sequence, receipt-self.delay, receipt, transform,
+                    sample = TransformSample(sequence + 1, receipt-self.delay, receipt, transform,
                                              source_frame=source_frame, tracking_quality=tracking_quality)
                 except (ValueError, IndexError, TypeError) as error:
-                    sample = TransformSample(sequence, receipt-self.delay, receipt, None,
+                    sample = TransformSample(sequence + 1, receipt-self.delay, receipt, None,
                                              False, str(error), source_frame, tracking_quality)
+                sequence += 1
                 previous_frame = source_frame
                 self.history.append(sample)
         finally:

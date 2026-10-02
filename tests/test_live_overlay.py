@@ -183,6 +183,31 @@ class AcquisitionTests(unittest.TestCase):
         self.assertFalse(samples[1].valid)
         self.assertTrue(tracker.closed)
 
+    def test_repeated_ndi_device_frame_is_ignored(self):
+        class Tracker:
+            closed = False
+            calls = 0
+            def start_tracking(self): pass
+            def get_frame(self):
+                time.sleep(.005)
+                self.calls += 1
+                source_frame = 1 if self.calls < 3 else self.calls - 1
+                matrix = np.eye(4)
+                return [1], [123], [source_frame], [matrix], [0.1]
+            def stop_tracking(self): pass
+            def close(self): self.closed = True
+        tracker = Tracker()
+        with tempfile.NamedTemporaryFile() as rom:
+            worker = NDIReceiver(rom.name, "FAKE", tracker_factory=lambda _: tracker)
+            with worker:
+                deadline = time.monotonic()+1
+                while len(worker.history.snapshot()) < 2 and time.monotonic() < deadline:
+                    time.sleep(.005)
+            samples = worker.history.snapshot()
+        self.assertTrue(all(sample.valid for sample in samples))
+        self.assertEqual(len({sample.source_frame for sample in samples}), len(samples))
+        self.assertTrue(tracker.closed)
+
     def test_real_udp_registration_decode_and_stop(self):
         publisher = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -191,6 +216,8 @@ class AcquisitionTests(unittest.TestCase):
             with RobotReceiver(publisher=publisher.getsockname()) as receiver:
                 registration, _ = publisher.recvfrom(16)
                 port, = struct.unpack("<H", registration)
+                retry, _ = publisher.recvfrom(16)
+                self.assertEqual(retry, registration)
                 packet = b"".join(POSE_RECORD.pack(
                     0., 0., .1, *np.eye(3).ravel(), i) for i in range(3))
                 publisher.sendto(b"bad", ("127.0.0.1", port))

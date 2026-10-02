@@ -68,6 +68,11 @@ class RobotReceiver:
         self._invalid_packets = 0
         self.receiver_port = None
 
+    def _register(self):
+        """Tell DVPControl where to send poses; safe to repeat after a restart."""
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as registration:
+            registration.sendto(struct.pack("<H", self.receiver_port), self.publisher)
+
     def start(self):
         """Bind and register, then return immediately while reception continues."""
         if self._thread is not None:
@@ -77,8 +82,7 @@ class RobotReceiver:
             receiver.bind(("127.0.0.1", 0)) # bind to any available port
             receiver.settimeout(0.2)  # Allows stop() to join the worker promptly.
             self.receiver_port = receiver.getsockname()[1]
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as registration:
-                registration.sendto(struct.pack("<H", self.receiver_port), self.publisher)
+            self._register()
         except BaseException:
             receiver.close()
             raise
@@ -102,6 +106,8 @@ class RobotReceiver:
 
     def _receive(self, receiver):
         sequence = 0
+        last_packet = time.monotonic()
+        last_registration = last_packet
         try:
             while not self._stop.is_set():
                 try:
@@ -109,6 +115,13 @@ class RobotReceiver:
                     monotonic_ns = time.monotonic_ns()
                     received_at_us = time.time_ns() // 1_000
                 except socket.timeout:
+                    now = time.monotonic()
+                    # DVPControl forgets the subscriber when it restarts.  Retry
+                    # registration while the stream is silent so the overlay can
+                    # recover without being relaunched.
+                    if now - last_packet >= 1 and now - last_registration >= 1:
+                        self._register()
+                        last_registration = now
                     continue
                 try:
                     poses = tuple(decode_poses(data))
@@ -117,6 +130,7 @@ class RobotReceiver:
                         self._invalid_packets += 1
                     continue
                 sequence += 1
+                last_packet = time.monotonic()
                 sample = PosePacket(sequence, monotonic_ns, received_at_us, poses, sender) # packafe into PosePacket
                 # Never hold the lock while waiting for a packet or decoding it.
                 with self._lock:
