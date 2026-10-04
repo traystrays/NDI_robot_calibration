@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import csv
+import faulthandler
 import json
 from pathlib import Path
 import sys
@@ -153,29 +154,24 @@ def start_dvpcontrol(executable=DVP_CONTROL_EXE):
     """Launch and prepare DVPControl before opening any overlay hardware."""
     try:
         from pywinauto.application import Application
-        import pyautogui
 
-        executable = Path(executable)
+        executable = Path(executable).resolve()
         if not executable.is_file():
             raise FileNotFoundError(executable)
-        app = Application(backend="win32").start(str(executable))
-        time.sleep(1)
+        print("Starting DVPControl...", flush=True)
+        app = Application(backend="win32").start(
+            f'"{executable}"', work_dir=str(executable.parent),
+            timeout=15, wait_for_idle=False)
         window = app.top_window()
-        window["NO"].click_input()
-        print("Clicked 'NO' button to dismiss the dialog.")
+        window["NO"].wait("visible enabled", timeout=15).click_input()
+        print("Clicked 'NO' button to dismiss the dialog.", flush=True)
 
         time.sleep(1)
         window = app.top_window()
-        window["Save SUJ"].click_input()
-        print("Clicked 'Save SUJ' button to save the SUJ file.")
-
-        time.sleep(1)
-        pyautogui.keyDown("alt")
-        try:
-            pyautogui.press("tab")
-        finally:
-            pyautogui.keyUp("alt")
+        window["Save SUJ"].wait("visible enabled", timeout=15).click_input()
+        print("Clicked 'Save SUJ'; waiting for DVPControl startup.", flush=True)
         time.sleep(5)
+        print("DVPControl startup step complete.", flush=True)
         return app
     except Exception as error:
         raise RuntimeError(f"DVPControl startup failed: {error}") from error
@@ -199,6 +195,7 @@ def run(args):
             robot_config = config.get("robot", {}) # if that key is missing use empty
             dvpcontrol = start_dvpcontrol(
                 robot_config.get("dvpcontrol_exe", DVP_CONTROL_EXE))
+            print("Loading overlay calibration...", flush=True)
             renderer = OverlayRenderer.from_config(config["overlay"]) # info for overlay
             video = config["video"]
             display_scale = float(video.get("display_scale", display_scale))
@@ -216,18 +213,23 @@ def run(args):
             cameras = []
 
             for name in ("ecm", "ultrasound"):
+                print(f"Opening {name} camera {video[name+'_camera']} "
+                      f"(backend={video.get('backend', 'any')})...", flush=True)
                 camera = VideoReceiver(video[name+"_camera"], resolution=video[name+"_resolution"],
                                        fps=video.get("fps", 30), backend=backend,
                                        latency_ms=video.get(name+"_latency_ms", 0))
                 live_cam = stack.enter_context(camera)
                 cameras.append(live_cam)
+                print(f"{name} camera ready.", flush=True)
 
             ndi_config = dict(config["ndi"])
             rom = Path(ndi_config["rom_path"])
             ndi_config["rom_path"] = str(rom if rom.is_absolute() else ROOT / rom)
 
+            print(f"Starting NDI tracker on {ndi_config['serial_port']}...", flush=True)
             ndi = stack.enter_context(NDIReceiver(**ndi_config)) # init ndi receiver
 
+            print("NDI tracker ready. Starting robot UDP receiver...", flush=True)
             robot = stack.enter_context(RobotReceiver(
                 publisher=(robot_config.get("host", "127.0.0.1"), robot_config.get("port", 60000))))
             robot_history = RobotPoseHistory(robot, robot_config.get("latency_ms", 0))
@@ -236,7 +238,9 @@ def run(args):
                          robot_history, ndi.history]
             timing = config.get("synchronization", {})
             startup_timeout_s = timing.pop("startup_timeout_s", 5)
+            print("Waiting for valid robot and NDI measurements...", flush=True)
             wait_for_tracking(robot_history, ndi.history, robot, startup_timeout_s)
+            print("Tracking ready.", flush=True)
 
         sync = FrameSynchronizer(*histories, **timing)
 
@@ -261,8 +265,11 @@ def run(args):
             stack.callback(writer.release)
         gui = None
         if not args.headless:
+            print("Opening overlay dashboard...", flush=True)
             gui = OverlayGUI(renderer.resolution, display_scale)
             stack.callback(gui.close)
+        faulthandler.cancel_dump_traceback_later()
+        print("Overlay running.", flush=True)
         display_image = None
         last_gui_ns = 0
         started = time.monotonic()
@@ -329,12 +336,16 @@ def main():
     parser.add_argument("--check-config", action="store_true",
                         help="Load calibration and require valid robot/NDI input")
     args = parser.parse_args()
+    # Report all worker stacks if a native call blocks hardware startup.
+    faulthandler.dump_traceback_later(30, repeat=True)
     try:
         run(args)
     except KeyboardInterrupt:
         print("Stopped")
     except (ValueError, RuntimeError, OSError, KeyError, ImportError) as error:
         parser.exit(1, f"Overlay error: {error}\n")
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":

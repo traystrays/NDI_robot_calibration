@@ -1,7 +1,7 @@
 {
   "video": {
     "ecm_camera": 0,
-    "ultrasound_camera": 1,
+    "ultrasound_camera": 4,
     "ecm_resolution": [
       1920,
       1080
@@ -12,12 +12,12 @@
     ],
     "display_scale": 0.5,
     "fps": 30,
-    "backend": "any",
+    "backend": "dshow",
     "ecm_latency_ms": 0,
     "ultrasound_latency_ms": 0
   },
   "ndi": {
-    "rom_path": "..\\RobotNDI_Calib\\NDI_DataLogger\\code\\resources\\tooltip_marker.rom",
+    "rom_path": "C://Users//rcl//Documents//Zijian//Calibration//RobotNDI_Calib//NDI_DataLogger//code//resources//us_tool.rom",
     "serial_port": "COM7",
     "tracker_type": "polaris",
     "tool_index": 0,
