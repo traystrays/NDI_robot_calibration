@@ -4,6 +4,7 @@ Shared lifecycle for live camera, tracking, and UDP acquisition workers.
 """
 
 import threading
+import time
 
 
 class Worker:
@@ -20,9 +21,13 @@ class Worker:
             raise RuntimeError("Create a new receiver to restart acquisition")
         self._thread = threading.Thread(target=self._run, name=self.name, daemon=True)
         self._thread.start()
-        if not self._ready.wait(timeout): # check it if started. wait for self._ready to be set, with a timeout
-            self._stop.set()
-            raise TimeoutError(f"{self.name}: startup timed out; device driver may be blocked")
+        deadline = time.monotonic() + timeout
+        while not self._ready.wait(min(1, max(0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline:
+                self._stop.set()
+                raise TimeoutError(f"{self.name}: startup timed out after {timeout:g}s; "
+                                   "device driver may be blocked or device is in use")
+            print(f"{self.name}: waiting for device startup...", flush=True)
         if self.error:
             self.stop()
             raise RuntimeError(f"{self.name}: {self.error}") from self.error

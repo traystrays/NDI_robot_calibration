@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "si_csv": "D:/20260831_calib/data_local_part_1_31_8_2026_12_49_33.csv",
-    "ndi_csv": "D:/20260831_calib/ParticipantData31-08-2026_12-47-41.csv",
+    "si_csv": "./data/20261003_live/data_local_part_1_3_10_2026_19_36_21.csv",
+    "ndi_csv": "C:/Users/rcl/Documents/Zijian/Calibration/RobotNDI_Calib/NDI_DataLogger/data/20261003_test.csv",
     "si_robot_params": "./data/si_robot/hand_eye_0727_python.npz"
   },
   "video":{
-    "input": "./data/20260826_calib/video_stream_1_20260826_151407.mp4",
-    "timestamp": "./data/20260826_calib/video_stream_1_20260826_151407_timestamps.txt",
+    "input": "./data/20261003_live/video_stream_1_20261003_193604.mp4",
+    "timestamp": "./data/20261003_live/video_stream_1_20261003_193604_timestamps.txt",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -42,11 +42,11 @@
     "max_pairs": 600
   },
   "output": {
-    "calib_file": "./data/20260831_calib/calib.npz",
-    "marker_mount_file": "./data/20260831_calib/marker_mount.npz",
-    "marker_error_output": "./data/20260831_calib/marker_prediction_errors.csv",
-    "match_output": "./data/20260831_calib/matched_output.csv",
-    "selected_frames": "./data/20260831_calib/selected_calibration_frames.csv"
+    "calib_file": "./data/20261003_calib/calib.npz",
+    "marker_mount_file": "./data/20261003_calib/marker_mount.npz",
+    "marker_error_output": "./data/20261003_calib/marker_prediction_errors.csv",
+    "match_output": "./data/20261003_calib/matched_output.csv",
+    "selected_frames": "./data/20261003_calib/selected_calibration_frames.csv"
   },
   "camera": {
     "parameters_file": "./data/si_robot/calib_intrinsics.npz"

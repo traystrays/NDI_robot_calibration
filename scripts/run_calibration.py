@@ -1,7 +1,13 @@
 """Example config-driven workflow for NDI-to-robot calibration."""
 
 import json
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Allow direct execution from a source checkout without an editable install.
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
 import pandas as pd
 
 import numpy as np
@@ -19,7 +25,6 @@ from ndi_robot_registration.transforms import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = PROJECT_ROOT/"scripts"/"calib_config.json"
 
 
