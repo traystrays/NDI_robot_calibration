@@ -151,6 +151,9 @@ def wait_for_tracking(robot_history, ndi_history, robot_receiver, timeout_s):
 
 def start_dvpcontrol(executable=DVP_CONTROL_EXE):
     """Launch and prepare DVPControl before opening any overlay hardware."""
+
+    # THIS NEEDS TO BE UPDATED #
+    # check if it is running, if not start it, then click NO and Save SUJ
     try:
         from pywinauto.application import Application
         import pyautogui
