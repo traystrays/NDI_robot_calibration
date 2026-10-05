@@ -11,8 +11,8 @@ and ultrasound feeds, ECM/PSM1/PSM2 positions in metres and row-major rotation
 matrices, and the probe position in NDI tracker coordinates. Sidebar data is
 latest available data, not the synchronized bundle. Missing, stale, or invalid
 samples are labeled and their values hidden. Images retain their aspect ratio.
-Press Q or Escape, or close the window, to stop. `--headless` skips the dashboard;
-the optional MP4 still records only the overlay image.
+Press Q or Escape, or close the window, to stop. `--headless` skips the dashboard.
+`--output` records only the overlay image; `--gui-output` records the full dashboard.
 
 ## What was built
 
@@ -43,6 +43,12 @@ NDI tracker worker ----------> bounded pose history ------/       |
    nonfinite, repeated device frames, or nonrigid transforms produce invalid
    packets rather than reusing a previous pose. Device frame number and quality
    are retained. No empirical quality-error cutoff is assumed.
+   Hardware polling runs in a separate spawned process: blocking `ndicapy`
+   serial calls otherwise stall other Python threads, including the GUI. A
+   receiver thread transfers small pose packets into the bounded history;
+   timestamps remain the device process's original host receipt times. The
+   process releases the tracker on exit. If its driver blocks during shutdown,
+   it is terminated after three seconds and a shutdown error is reported.
 4. Every stream keeps a bounded history. Defaults: 30 frames per camera and
    300 poses per tracker. Oldest data is evicted. At 1280x720, both frame histories
    together hold about 158 MiB of image data; account for higher resolutions.
@@ -69,10 +75,16 @@ NDI tracker worker ----------> bounded pose history ------/       |
    projections are labelled and not drawn. The planar homography approximation
    is inherited from the offline implementation; it is not dense distortion-aware
    reprojection across every ultrasound pixel.
+   Warping/blending is restricted to the projected slice's visible bounds,
+   including interpolation support at its edges. OpenCV performs the blend
+   without full-frame NumPy float temporaries. Display previews use linear
+   resizing; capture images and calibration resolution remain unchanged.
 8. OpenCV display runs on the main thread. When overloaded, the app displays only
    the freshest finalized frame rather than accumulating a render queue. It
    counts skipped frames. If ECM stops, the old overlay is replaced by a waiting/
    stale screen. Acquisition exceptions terminate the session with an error.
+   Overlay age is checked again after rendering, and the dashboard uses a fresh
+   clock reading rather than the time at the beginning of the processing loop.
 9. Escape, q, window close, Ctrl+C, or an exception clean up through `ExitStack`.
    Workers release cameras/tracker in `finally`; robot reception uses its existing
    timeout and shutdown. Some native camera/serial drivers can block indefinitely:
@@ -81,7 +93,11 @@ NDI tracker worker ----------> bounded pose history ------/       |
 ## Timestamp contract: what is and is not synchronized
 
 This implementation provides **bounded receipt-time matching on one computer**.
-All streams use `time.monotonic_ns()`. Never mix wall-clock timestamps, a different
+All streams use `LiveData.clock.clock_ns()`, backed by `time.perf_counter_ns()`.
+This gives a shared high-resolution monotonic clock across the receiver and NDI
+processes. Python 3.11's Windows `time.monotonic_ns()` has 15.6 ms resolution and
+is deliberately avoided for frame matching and GUI scheduling. Never mix its
+timestamps, wall-clock timestamps, a different
 computer's monotonic clock, or unconverted device ticks into these histories.
 
 OpenCV capture time is unavailable through the logger's current interface. The
@@ -182,7 +198,22 @@ python scripts/live_ultrasound_overlay.py --config scripts/live_overlay_config.j
 ```
 
 Optionally add `--output data/live_overlay.mp4`, `--seconds 30`, or `--headless`.
-The MP4 is a constant-30-fps visual preview, **not a timing-preserving recording**.
+To record the GUI with all previews and telemetry panels, use:
+
+```bash
+python scripts/live_ultrasound_overlay.py --config scripts/live_overlay_config.json --gui-output data/live_dashboard.mp4
+```
+
+The dashboard recording captures the displayed canvas at 1440x960, independently
+of window resizing, and excludes desktop/window borders. It includes waiting/stale
+screens and requires GUI mode. Both output options can be used together with
+different filenames. Recordings stop and finalize when the app exits.
+The dashboard MP4 uses a 30-fps timeline based on elapsed monotonic time. When GUI
+updates are slower, it repeats the previously displayed frame for the elapsed
+interval, including the final interval before exit, so playback retains the
+original speed (within one video frame). This preserves display timing, not
+camera capture timing. The overlay-only `--output` remains a constant-30-fps
+visual preview and does not preserve timing when rendering runs slower.
 The CSV contains actual chosen monotonic times, source sequences, signed errors,
 display age, and rendering status. Only frames selected for display are logged;
 console counters also report matched/unmatched anchors and skipped frames.

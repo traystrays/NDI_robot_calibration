@@ -1,0 +1,14 @@
+{
+  "rows": 1587,
+  "ecm_timestamp_span_seconds": 53.5049278,
+  "processed_fps": 29.642129523628665,
+  "age_mean_ms": 69.90796672967863,
+  "age_median_ms": 70.7715,
+  "age_max_ms": 92.1848,
+  "status_counts": {
+    "robot_unmatched,ndi_unmatched": 1,
+    "robot_unmatched": 1,
+    "rendered": 1251,
+    "ndi_invalid": 334
+  }
+}

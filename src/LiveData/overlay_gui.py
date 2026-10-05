@@ -1,6 +1,42 @@
 """OpenCV dashboard for the live overlay; acquisition stays in the receivers."""
 import cv2
 import numpy as np
+from .clock import clock_ns
+
+
+class RealtimeVideoWriter:
+    """Hold each displayed frame for its elapsed duration in a fixed-fps video."""
+
+    def __init__(self, writer, fps=30):
+        self.writer = writer
+        self.fps = fps
+        self.started_ns = None
+        self.frame = None
+        self.frames_written = 0
+
+    def _write_until(self, now_ns):
+        if self.frame is None:
+            return
+        # A frame occupies each output tick before the next display update.
+        elapsed_ns = max(0, now_ns - self.started_ns)
+        target = (elapsed_ns * self.fps + 999_999_999) // 1_000_000_000
+        while self.frames_written < target:
+            self.writer.write(self.frame)
+            self.frames_written += 1
+
+    def write(self, frame):
+        now_ns = clock_ns()
+        if self.started_ns is None:
+            self.started_ns = now_ns
+        self._write_until(now_ns)
+        self.frame = frame.copy()
+
+    def release(self):
+        try:
+            self._write_until(clock_ns())
+        finally:
+            self.frame = None
+            self.writer.release()
 
 
 class OverlayGUI:
@@ -30,7 +66,7 @@ class OverlayGUI:
             available_w, available_h = w-16, h-42
             scale = min(available_w/image.shape[1], available_h/image.shape[0])
             width, height = max(1, round(image.shape[1]*scale)), max(1, round(image.shape[0]*scale))
-            resized = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+            resized = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
             left, top = x+(w-width)//2, y+34+(available_h-height)//2
             canvas[top:top+height, left:left+width] = resized
         for index, line in enumerate(lines):
@@ -49,7 +85,8 @@ class OverlayGUI:
     @classmethod
     def compose(cls, overlay, *, ecm, ultrasound, robot, ndi, now_ns, max_age_ns):
         """Build a display image. Sidebar samples are latest, not time-matched."""
-        canvas = np.full((cls.size[1], cls.size[0], 3), (23, 27, 33), np.uint8)
+        canvas = np.empty((cls.size[1], cls.size[0], 3), np.uint8)
+        cv2.rectangle(canvas, (0, 0), (cls.size[0]-1, cls.size[1]-1), (23, 27, 33), -1)
         cls._panel(canvas, (12, 12, 984, 936), "LIVE OVERLAY | time-matched",
                    overlay, () if overlay is not None else ("WAITING / STALE: no current synchronized video",))
         for y, name, sample in ((12, "ECM", ecm), (264, "ULTRASOUND", ultrasound)):
@@ -75,9 +112,12 @@ class OverlayGUI:
         cls._panel(canvas, (1008, 852, 420, 96), f"NDI POSITION | {state}", lines=lines)
         return canvas
 
-    def update(self, overlay, **samples):
+    def update(self, overlay, *, video_writer=None, **samples):
         """Draw and process window events; return False when the user exits."""
         if cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) < 1:
             return False
-        cv2.imshow(self.title, self.compose(overlay, **samples))
+        canvas = self.compose(overlay, **samples)
+        cv2.imshow(self.title, canvas)
+        if video_writer is not None:
+            video_writer.write(canvas)
         return cv2.waitKey(1) & 0xff not in (27, ord("q"))

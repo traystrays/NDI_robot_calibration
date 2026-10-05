@@ -10,7 +10,7 @@
       1920,
       1080
     ],
-    "display_scale": 0.5,
+    "display_scale": 1.0,
     "fps": 30,
     "backend": "dshow",
     "ecm_latency_ms": 0,
@@ -41,9 +41,9 @@
   },
   "overlay": {
     "image_to_probe": "data/20260831_reproj/image_to_probe_transform.npz",
-    "ndi_to_base": "data/20260831_calib/calib.npz",
-    "ecm_to_camera": "data/si_robot/hand_eye_0727_python.npz",
-    "camera_parameters": "data/si_robot/calib_intrinsics.npz",
+    "ndi_to_base": "data/20261003_calib/calib.npz",
+    "ecm_to_camera": "data/si_robot/hand_eye.npz",
+    "camera_parameters": "data/si_robot/camera_intrinsics.npz",
     "calibration_resolution": [
       1920,
       1080
@@ -60,6 +60,6 @@
     ],
     "rotate_180": true,
     "roll_deg": 0,
-    "opacity": 0.65
+    "opacity": 0.8
   }
 }

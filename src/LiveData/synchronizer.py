@@ -7,9 +7,9 @@ stream samples; it is not interpolation or hardware synchronization.
 """
 from dataclasses import dataclass
 import math
-import time
 
 from .packets import VideoFrame, TransformSample
+from .clock import clock_ns
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class FrameSynchronizer:
         self.matched = self.unmatched = self.dropped = 0
 
     def poll(self, now_ns=None):
-        now = time.monotonic_ns() if now_ns is None else now_ns
+        now = clock_ns() if now_ns is None else now_ns
         frames = [f for f in self.ecm.snapshot() if f.sequence > self.last_sequence]
         if frames and frames[0].sequence > self.last_sequence + 1:
             self.dropped += frames[0].sequence - self.last_sequence - 1

@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT)]
@@ -19,6 +19,7 @@ from LiveData.synchronizer import FrameSynchronizer
 from LiveData.receivers import VideoReceiver, NDIReceiver, RobotPoseHistory
 from LiveData.robot_receiver_class import RobotReceiver, POSE_RECORD
 from LiveData.worker import Worker
+from LiveData.overlay_gui import RealtimeVideoWriter
 from scripts.live_ultrasound_overlay import demo_setup, demo_feed, OverlayRenderer
 
 
@@ -28,6 +29,42 @@ def video(n, t):
 
 def pose(n, t, valid=True):
     return TransformSample(n, t, t, np.eye(4) if valid else None, valid)
+
+
+class RecordingTests(unittest.TestCase):
+    def test_irregular_updates_preserve_display_duration_and_final_interval(self):
+        writer = Mock()
+        recording = RealtimeVideoWriter(writer)
+        first = np.zeros((2, 2, 3), np.uint8)
+        second = np.full_like(first, 100)
+        third = np.full_like(first, 200)
+        with patch("LiveData.overlay_gui.clock_ns",
+                   side_effect=[1_000_000_000, 1_100_000_000,
+                                1_350_000_000, 1_500_000_000]):
+            recording.write(first)
+            first[:] = 255  # The recording owns the retained display frame.
+            recording.write(second)
+            recording.write(third)
+            recording.release()
+        frames = [call.args[0] for call in writer.write.call_args_list]
+        self.assertEqual(len(frames), 15)  # 0.5 seconds at 30 fps, not 3 frames.
+        self.assertEqual([int(frame[0, 0, 0]) for frame in frames],
+                         [0] * 3 + [100] * 8 + [200] * 4)
+        writer.release.assert_called_once()
+
+    def test_release_without_frames_and_encoding_failure(self):
+        writer = Mock()
+        RealtimeVideoWriter(writer).release()
+        writer.write.assert_not_called()
+        writer.release.assert_called_once()
+        writer = Mock()
+        writer.write.side_effect = RuntimeError("encoding failed")
+        recording = RealtimeVideoWriter(writer)
+        with patch("LiveData.overlay_gui.clock_ns", side_effect=[0, 100_000_000]):
+            recording.write(np.zeros((2, 2, 3), np.uint8))
+            with self.assertRaisesRegex(RuntimeError, "encoding failed"):
+                recording.release()
+        writer.release.assert_called_once()
 
 
 class MatchingTests(unittest.TestCase):

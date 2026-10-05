@@ -1,0 +1,47 @@
+{
+  "ndi_off": {
+    "overlay": {
+      "median_ms": 5.8784999419003725,
+      "max_ms": 19.702200079336762
+    },
+    "compose": {
+      "median_ms": 3.3867999445647,
+      "max_ms": 5.627400008961558
+    },
+    "recording": {
+      "median_ms": 5.349150043912232,
+      "max_ms": 13.220499968156219
+    },
+    "heartbeat": {
+      "median_ms": 1.980649889446795,
+      "max_ms": 5.358699942007661
+    },
+    "update_fps": 29.9996556041252,
+    "playback_seconds": 5.0
+  },
+  "ndi_on": {
+    "overlay": {
+      "median_ms": 6.458449992351234,
+      "max_ms": 23.61100004054606
+    },
+    "compose": {
+      "median_ms": 3.5782000049948692,
+      "max_ms": 6.252800114452839
+    },
+    "recording": {
+      "median_ms": 5.067300051450729,
+      "max_ms": 12.583500007167459
+    },
+    "ipc_age": {
+      "median_ms": 31.0,
+      "max_ms": 47.0
+    },
+    "heartbeat": {
+      "median_ms": 1.9890000112354755,
+      "max_ms": 5.1414999179542065
+    },
+    "update_fps": 29.99459917255203,
+    "ndi_samples": 101,
+    "playback_seconds": 5.0
+  }
+}

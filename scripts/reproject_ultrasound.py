@@ -333,20 +333,37 @@ def overlay_slice(
         dtype=np.float32,
     )
     homography = cv2.getPerspectiveTransform(source, destination_corners)
-    output_size = (ecm_frame.shape[1], ecm_frame.shape[0])
+    # Only warp/blend the projected slice's bounding box, rather than allocating
+    # several full-resolution float arrays for every live frame.
+    # Bilinear sampling extends one source pixel beyond each scan edge. Project
+    # that support too, so enlarged/clipped slices keep their antialiased border.
+    support = np.array([[-1., -1., 1.], [width, -1., 1.],
+                        [width, height, 1.], [-1., height, 1.]]) @ homography.T
+    denominators = support[:, 2]
+    if (np.isfinite(support).all() and
+            (np.all(denominators > 1e-12) or np.all(denominators < -1e-12))):
+        bounds = support[:, :2] / denominators[:, None]
+        limits = [ecm_frame.shape[1], ecm_frame.shape[0]]
+        left, top = np.clip(np.floor(bounds.min(axis=0)) - 1, 0, limits).astype(int)
+        right, bottom = np.clip(np.ceil(bounds.max(axis=0)) + 2, 0, limits).astype(int)
+    else:
+        left, top, right, bottom = 0, 0, ecm_frame.shape[1], ecm_frame.shape[0]
+    result = ecm_frame.copy()
+    if right <= left or bottom <= top:
+        return result
+    translation = np.array([[1., 0, -left], [0, 1., -top], [0, 0, 1.]])
+    homography = translation @ homography
+    output_size = (right - left, bottom - top)
     warped = cv2.warpPerspective(scan, homography, output_size)
     mask = cv2.warpPerspective(
         np.full((height, width), 255, dtype=np.uint8),
         homography,
         output_size,
     ).astype(np.float32) / 255.0
-    alpha = np.clip(mask * opacity, 0.0, 1.0)[:, :, None]
-    return np.clip(
-        warped.astype(np.float32) * alpha
-        + ecm_frame.astype(np.float32) * (1.0 - alpha),
-        0,
-        255,
-    ).astype(np.uint8)
+    alpha = np.clip(mask * opacity, 0.0, 1.0)
+    result[top:bottom, left:right] = cv2.blendLinear(
+        warped, ecm_frame[top:bottom, left:right], alpha, 1.0 - alpha)
+    return result
 
 
 def _read_frame(capture: cv2.VideoCapture, frame_number: int) -> np.ndarray:
