@@ -17,15 +17,15 @@ class OverlayGUI:
         cv2.destroyWindow(self.title)
 
     @staticmethod
-    def _text(canvas, text, x, y, scale=.48, color=(210, 218, 225)):
+    def _text(canvas, text, x, y, scale=.48, color=(45, 45, 45)):
         cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                     scale, color, 1, cv2.LINE_AA)
 
     @classmethod
     def _panel(cls, canvas, box, title, image=None, lines=()):
         x, y, w, h = box
-        cv2.rectangle(canvas, (x, y), (x+w-1, y+h-1), (65, 73, 83), 1)
-        cls._text(canvas, title, x+12, y+23, .52, (230, 220, 150))
+        cv2.rectangle(canvas, (x, y), (x+w-1, y+h-1), (190, 190, 190), 1)
+        cls._text(canvas, title, x+12, y+23, .52, (110, 75, 20))
         if image is not None:
             available_w, available_h = w-16, h-42
             scale = min(available_w/image.shape[1], available_h/image.shape[0])
@@ -49,7 +49,7 @@ class OverlayGUI:
     @classmethod
     def compose(cls, overlay, *, ecm, ultrasound, robot, ndi, now_ns, max_age_ns):
         """Build a display image. Sidebar samples are latest, not time-matched."""
-        canvas = np.full((cls.size[1], cls.size[0], 3), (23, 27, 33), np.uint8)
+        canvas = np.full((cls.size[1], cls.size[0], 3), 255, np.uint8)
         cls._panel(canvas, (12, 12, 984, 936), "LIVE OVERLAY | time-matched",
                    overlay, () if overlay is not None else ("WAITING / STALE: no current synchronized video",))
         for y, name, sample in ((12, "ECM", ecm), (264, "ULTRASOUND", ultrasound)):
