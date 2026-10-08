@@ -14,6 +14,10 @@ import threading
 
 if __package__:
     from .worker import Worker
+    from .clock import clock_ns
+else:
+    from worker import Worker
+    from clock import clock_ns
 
 # EpiLogger's DVAPI_MIP: float pos[3], float orientation[9], int type.
 # Three 52-byte records form the 156-byte pose packet on this Windows setup.
@@ -114,7 +118,7 @@ class RobotReceiver(Worker):
             while not self._stop.is_set():
                 try:
                     data, sender = receiver.recvfrom(65535)
-                    monotonic_ns = time.monotonic_ns()
+                    monotonic_ns = clock_ns()
                     received_at_us = time.time_ns() // 1_000
                 except socket.timeout:
                     now = time.monotonic()
@@ -153,7 +157,7 @@ class RobotReceiver(Worker):
             return tuple(self._buffer)
 
     def nearest(self, timestamp_ns, max_delta_ms=40.0):
-        """Find a sample near a time.monotonic_ns() timestamp, or return None.
+        """Find a sample near a clock_ns() timestamp, or return None.
 
         Searches existing history only; does not wait for a future sample.
         """

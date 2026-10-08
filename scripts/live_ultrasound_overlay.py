@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import csv
+from dataclasses import replace
 import faulthandler
 import json
 from pathlib import Path
@@ -24,7 +25,8 @@ from LiveData.packets import History, VideoFrame, TransformSample
 from LiveData.receivers import VideoReceiver, NDIReceiver, RobotPoseHistory
 from LiveData.robot_receiver_class import RobotReceiver
 from LiveData.synchronizer import FrameSynchronizer
-from LiveData.overlay_gui import OverlayGUI
+from LiveData.overlay_gui import OverlayGUI, RealtimeVideoWriter
+from LiveData.clock import clock_ns
 from scripts.reproject_ultrasound import (
     load_image_to_probe, load_npz_transform, load_camera_parameters,
     ultrasound_corners_in_probe, roll_slice_about_depth_axis,
@@ -183,6 +185,10 @@ def start_dvpcontrol(executable=DVP_CONTROL_EXE):
 def run(args):
     if args.seconds is not None and (not np.isfinite(args.seconds) or args.seconds <= 0):
         raise ValueError("--seconds must be finite and positive")
+    if args.gui_output and args.headless:
+        raise ValueError("--gui-output requires the GUI; remove --headless")
+    if args.gui_output and args.output and args.gui_output.resolve() == args.output.resolve():
+        raise ValueError("--gui-output and --output must use different paths")
     display_scale = 3.0
     with ExitStack() as stack: # keeps track of the cleanup
         workers = []
@@ -267,10 +273,21 @@ def run(args):
                 raise RuntimeError(f"Cannot open output {args.output}")
             stack.callback(writer.release)
         gui = None
+        gui_writer = None
         if not args.headless:
             print("Opening overlay dashboard...", flush=True)
             gui = OverlayGUI(renderer.resolution, display_scale)
             stack.callback(gui.close)
+            if args.gui_output:
+                args.gui_output.parent.mkdir(parents=True, exist_ok=True)
+                gui_writer = cv2.VideoWriter(
+                    str(args.gui_output), cv2.VideoWriter_fourcc(*"mp4v"), 30, gui.size)
+                if not gui_writer.isOpened():
+                    gui_writer.release()
+                    raise RuntimeError(f"Cannot open GUI output {args.gui_output}")
+                gui_writer = RealtimeVideoWriter(gui_writer)
+                stack.callback(gui_writer.release)
+                print(f"Recording dashboard to {args.gui_output}", flush=True)
         faulthandler.cancel_dump_traceback_later()
         print("Overlay running.", flush=True)
         display_image = None
@@ -281,7 +298,7 @@ def run(args):
         sequence = 0
         rendered = 0
         while args.seconds is None or time.monotonic() - started < args.seconds:
-            now = time.monotonic_ns()
+            now = clock_ns()
             for worker in workers:
                 if worker.error is not None:
                     raise RuntimeError(f"Acquisition failed: {worker.error}")
@@ -294,26 +311,31 @@ def run(args):
                 sync.dropped += len(bundles) - 1
             for bundle in bundles[-1:]:
                 image, status = renderer.render(bundle)
+                # Rendering can itself exhaust the age budget; do not display an
+                # old overlay merely because it was fresh when polling began.
+                if clock_ns() - bundle.ecm.monotonic_ns > sync.max_age_ns:
+                    image, status = renderer.render(replace(bundle, status="stale"))
                 rendered += status == "rendered"
                 samples = (bundle.ultrasound, bundle.robot, bundle.ndi)
 
                 csv_writer.writerow([bundle.ecm.sequence, bundle.ecm.monotonic_ns,
                     *[s.sequence if s else "" for s in samples],
                     *[s.monotonic_ns if s else "" for s in samples], *bundle.errors_ms,
-                    (time.monotonic_ns()-bundle.ecm.monotonic_ns)/1e6, status])
+                    (clock_ns()-bundle.ecm.monotonic_ns)/1e6, status])
                 
                 log.flush() # push buffered CSV from python to disk; OS may still buffer it
                 if writer:
                     writer.write(image)
                 display_image = image
-                last_display_ns = now
+                last_display_ns = bundle.ecm.monotonic_ns
 
+            now = clock_ns()
             if gui is not None and now-last_gui_ns >= 33_000_000:
                 current_overlay = display_image
                 if not last_display_ns or now-last_display_ns > sync.max_age_ns:
                     current_overlay = None
                 if not gui.update(
-                        current_overlay, ecm=histories[0].latest(),
+                        current_overlay, video_writer=gui_writer, ecm=histories[0].latest(),
                         ultrasound=histories[1].latest(),
                         robot=robot.latest() if robot is not None else None,
                         ndi=histories[3].latest(), now_ns=now, max_age_ns=sync.max_age_ns):
@@ -335,6 +357,8 @@ def main():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--output", type=Path, help="Optional constant-30-fps preview MP4; use CSV for actual timing")
+    parser.add_argument("--gui-output", type=Path,
+                        help="Record the full dashboard to a real-time 30-fps MP4 (requires GUI)")
     parser.add_argument("--log", type=Path, default=ROOT / "data/live_overlay_timing.csv")
     parser.add_argument("--check-config", action="store_true",
                         help="Load calibration and require valid robot/NDI input")

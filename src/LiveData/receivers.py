@@ -5,7 +5,7 @@ simultaneously. Positive latency_ms subtracts an independently measured device
 latency from receipt time; defaults make no claim about capture-time alignment.
 """
 import math
-import time
+import multiprocessing
 from pathlib import Path
 
 import cv2
@@ -13,6 +13,7 @@ import numpy as np
 
 from .packets import History, VideoFrame, TransformSample
 from .worker import Worker
+from .clock import clock_ns
 
 
 def latency_ns(milliseconds):
@@ -43,7 +44,7 @@ class VideoReceiver(Worker):
             sequence = 0
             while not self._stop.is_set():
                 ok, image = capture.read()
-                receipt = time.monotonic_ns()
+                receipt = clock_ns()
                 if not ok:
                     raise RuntimeError(f"Camera {self.camera} stopped returning frames")
                 if (image.shape[1], image.shape[0]) != tuple(self.resolution):
@@ -56,9 +57,66 @@ class VideoReceiver(Worker):
             capture.release()
 
 
+def _ndi_tracking_process(settings, tool_index, delay, stop, send, tracker_factory=None):
+    """Keep blocking ndicapy calls outside the GUI's Python interpreter."""
+    tracker = None
+    try:
+        if tracker_factory is None:
+            from sksurgerynditracker.nditracker import NDITracker
+            tracker_factory = NDITracker
+        tracker = tracker_factory(settings)
+        tracker.use_quaternions = False
+        tracker.start_tracking()
+        send(("ready", None))
+        sequence = 0
+        previous_frame = None
+        while not stop.is_set():
+            frame = tracker.get_frame()
+            receipt = clock_ns()
+            source_frame = tracking_quality = None
+            try:
+                _, _, numbers, tracking, quality = frame
+                source_frame = int(numbers[tool_index])
+                tracking_quality = float(quality[tool_index])
+                if source_frame == previous_frame:
+                    continue
+                transform = np.asarray(tracking[tool_index], dtype=float).copy()
+                transform[:3, 3] *= .001
+                if not np.isfinite(tracking_quality):
+                    raise ValueError("Nonfinite tracking quality")
+                sample = TransformSample(sequence + 1, receipt-delay, receipt, transform,
+                                         source_frame=source_frame, tracking_quality=tracking_quality)
+            except (ValueError, IndexError, TypeError) as error:
+                sample = TransformSample(sequence + 1, receipt-delay, receipt, None,
+                                         False, str(error), source_frame, tracking_quality)
+            sequence += 1
+            previous_frame = source_frame
+            send(("sample", (sample.sequence, sample.monotonic_ns, sample.received_ns,
+                             sample.transform, sample.valid, sample.reason,
+                             sample.source_frame, sample.tracking_quality)))
+    except Exception as error:
+        send(("error", f"{type(error).__name__}: {error}"))
+    finally:
+        if tracker is not None:
+            try:
+                tracker.stop_tracking()
+            finally:
+                tracker.close()
+
+
+def _ndi_process_entry(settings, tool_index, delay, stop, connection):
+    try:
+        _ndi_tracking_process(settings, tool_index, delay, stop, connection.send)
+    except (BrokenPipeError, EOFError):
+        if not stop.is_set():
+            raise
+    finally:
+        connection.close()
+
+
 class NDIReceiver(Worker):
     def __init__(self, rom_path, serial_port, *, tracker_type="polaris", tool_index=0,
-                 latency_ms=0, capacity=300):
+                 latency_ms=0, capacity=300, tracker_factory=None):
         super().__init__("ndi-tracker")
         self.history = History(capacity) # init bounded history
         self.settings = {"tracker type": tracker_type, "romfiles": [str(rom_path)],
@@ -69,48 +127,65 @@ class NDIReceiver(Worker):
             raise ValueError("One probe ROM is configured; tool_index must be 0")
         self.tool_index = tool_index
         self.delay = latency_ns(latency_ms)
+        self._tracker_factory = tracker_factory
+        self._process = None
+        self._shutdown_error = None
+
+    def stop(self):
+        super().stop()
+        if self._shutdown_error is not None:
+            raise RuntimeError(self._shutdown_error)
 
     def acquire(self):
-        from sksurgerynditracker.nditracker import NDITracker
-        tracker = NDITracker(self.settings)
+        def receive(message):
+            kind, value = message
+            if kind == "ready":
+                self._ready.set()
+            elif kind == "error":
+                raise RuntimeError(value)
+            elif kind == "sample":
+                # Recreate immutable arrays after IPC; preserve child receipt time.
+                self.history.append(TransformSample(*value))
+
+        if self._tracker_factory is not None:
+            # Injected fake trackers support hardware-independent unit tests only.
+            _ndi_tracking_process(self.settings, self.tool_index, self.delay,
+                                  self._stop, receive, self._tracker_factory)
+            return
+        context = multiprocessing.get_context("spawn")
+        incoming, outgoing = context.Pipe(duplex=False)
+        stop = context.Event()
+        process = context.Process(target=_ndi_process_entry,
+            args=(self.settings, self.tool_index, self.delay, stop, outgoing),
+            name="ndi-device", daemon=True)
+        self._process = process
         try:
-            tracker.use_quaternions = False
-            tracker.start_tracking()
-            self._ready.set()
-            sequence = 0
-            previous_frame = None
+            process.start()
+            outgoing.close()
             while not self._stop.is_set():
-                frame = tracker.get_frame()
-                receipt = time.monotonic_ns()
-                source_frame = None
-                tracking_quality = None
-                try:
-                    handles, timestamps, numbers, tracking, quality = frame
-                    source_frame = int(numbers[self.tool_index])
-                    tracking_quality = float(quality[self.tool_index])
-                    if source_frame == previous_frame:
-                        # get_frame() can return the most recent device frame faster
-                        # than the tracker produces new measurements.  A duplicate is
-                        # not a failed measurement and must not replace the latest
-                        # valid pose with an artificial ``ndi_invalid`` sample.
-                        continue
-                    transform = np.asarray(tracking[self.tool_index], dtype=float).copy()
-                    transform[:3, 3] *= 0.001  # NDI mm -> common metres.
-                    if not np.isfinite(np.asarray(quality[self.tool_index], dtype=float)).all():
-                        raise ValueError("Nonfinite tracking quality")
-                    sample = TransformSample(sequence + 1, receipt-self.delay, receipt, transform,
-                                             source_frame=source_frame, tracking_quality=tracking_quality)
-                except (ValueError, IndexError, TypeError) as error:
-                    sample = TransformSample(sequence + 1, receipt-self.delay, receipt, None,
-                                             False, str(error), source_frame, tracking_quality)
-                sequence += 1
-                previous_frame = source_frame
-                self.history.append(sample)
+                if incoming.poll(.05):
+                    try:
+                        receive(incoming.recv())
+                    except EOFError:
+                        raise RuntimeError(f"NDI process exited (code {process.exitcode})") from None
+                elif not process.is_alive():
+                    raise RuntimeError(f"NDI process exited (code {process.exitcode})")
         finally:
+            stop.set()
+            outgoing.close()
             try:
-                tracker.stop_tracking()
+                if process.pid is not None:
+                    process.join(3)
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(1)
+                        self._shutdown_error = "NDI driver blocked during shutdown; device process terminated"
+                    process.close()
+                    if self._shutdown_error is not None:
+                        raise RuntimeError(self._shutdown_error)
             finally:
-                tracker.close()
+                incoming.close()
+                self._process = None
 
 
 class RobotPoseHistory:

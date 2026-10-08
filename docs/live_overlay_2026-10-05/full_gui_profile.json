@@ -1,0 +1,17 @@
+{
+  "gui_updates": 417,
+  "gui_fps": 27.8,
+  "gui_update_median_ms": 13.079599943012,
+  "gui_update_max_ms": 36.544400034472346,
+  "render_median_ms": 10.226249927654862,
+  "render_max_ms": 25.57689999230206,
+  "logged_frames": 448,
+  "age_median_ms": 73.82895,
+  "age_max_ms": 99.7675,
+  "status_counts": {
+    "robot_unmatched,ndi_unmatched": 1,
+    "robot_unmatched,ndi_invalid": 1,
+    "ndi_invalid": 446
+  },
+  "playback_seconds": 15.0
+}
