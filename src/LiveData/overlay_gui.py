@@ -53,15 +53,15 @@ class OverlayGUI:
         cv2.destroyWindow(self.title)
 
     @staticmethod
-    def _text(canvas, text, x, y, scale=.48, color=(210, 218, 225)):
+    def _text(canvas, text, x, y, scale=.48, color=(45, 45, 45)):
         cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                     scale, color, 1, cv2.LINE_AA)
 
     @classmethod
     def _panel(cls, canvas, box, title, image=None, lines=()):
         x, y, w, h = box
-        cv2.rectangle(canvas, (x, y), (x+w-1, y+h-1), (65, 73, 83), 1)
-        cls._text(canvas, title, x+12, y+23, .52, (230, 220, 150))
+        cv2.rectangle(canvas, (x, y), (x+w-1, y+h-1), (190, 190, 190), 1)
+        cls._text(canvas, title, x+12, y+23, .52, (110, 75, 20))
         if image is not None:
             available_w, available_h = w-16, h-42
             scale = min(available_w/image.shape[1], available_h/image.shape[0])
