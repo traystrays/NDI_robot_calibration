@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "si_csv": "./data/20261003_live/data_local_part_1_3_10_2026_19_36_21.csv",
-    "ndi_csv": "C:/Users/rcl/Documents/Zijian/Calibration/RobotNDI_Calib/NDI_DataLogger/data/20261003_test.csv",
+    "si_csv": "./data/20261012_calib/data_local_part_1_12_10_2026_16_42_4.csv",
+    "ndi_csv": "./data/20261012_calib/ParticipantData12-10-2026_16-36-26.csv",
     "si_robot_params": "./data/si_robot/hand_eye_0727_python.npz"
   },
   "video":{
-    "input": "./data/20261003_live/video_stream_1_20261003_193604.mp4",
-    "timestamp": "./data/20261003_live/video_stream_1_20261003_193604_timestamps.txt",
+    "input": "./data/20261012_calib/video_stream_1_20261012_164141.mp4",
+    "timestamp": "./data/20261012_calib/video_stream_1_20261012_164141_timestamps.txt",
     "time_tolerance": "30ms",
     "marker_radius": 10
   },
@@ -34,7 +34,7 @@
     "time_tolerance": "30ms"
   },
   "calibration": {
-    "hand-pick-frame": false,
+    "hand-pick-frame": true,
     "min_rotation_deg": 5.0,
     "min_translation": 0.05,
     "min_index_separation": 25,
@@ -42,7 +42,7 @@
     "max_pairs": 600
   },
   "output": {
-    "calib_file": "./data/20261003_calib/calib.npz",
+    "calib_file": "./data/20261012_calib/calib.npz",
     "marker_mount_file": "./data/20261003_calib/marker_mount.npz",
     "marker_error_output": "./data/20261003_calib/marker_prediction_errors.csv",
     "match_output": "./data/20261003_calib/matched_output.csv",

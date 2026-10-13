@@ -1,7 +1,7 @@
 {
   "video": {
-    "ecm_camera": 0,
-    "ultrasound_camera": 4,
+    "ecm_camera": 1,
+    "ultrasound_camera": 0,
     "ecm_resolution": [
       1920,
       1080
@@ -40,8 +40,8 @@
     "startup_timeout_s": 5
   },
   "overlay": {
-    "image_to_probe": "data/20260831_reproj/image_to_probe_transform.npz",
-    "ndi_to_base": "data/20261003_calib/calib.npz",
+    "image_to_probe": "data/si_robot/image_to_probe_transform.npz",
+    "ndi_to_base": "data/20261012_calib/calib.npz",
     "ecm_to_camera": "data/si_robot/hand_eye.npz",
     "camera_parameters": "data/si_robot/camera_intrinsics.npz",
     "calibration_resolution": [

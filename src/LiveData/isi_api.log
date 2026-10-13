@@ -1,4 +1,0 @@
-[16:43:51] dvapi_socket::Connect: ERROR: 0x105 (10061), File: ..\..\libsrc\src\dvapi\dvapi_socket.cpp, Line: 219
-[16:43:51] StreamManager::StartStream: Error: 0x103, File: ..\..\libsrc\src\isi_stream.cpp, Line: 83
-[16:43:54] isi_get_connection_status: Error: 0x103, File: ..\..\libsrc\src\isi_api.cpp, Line: 191
-[16:43:54] isi_stop_stream: Error: 0x103, File: ..\..\libsrc\src\isi_stream.cpp, Line: 423

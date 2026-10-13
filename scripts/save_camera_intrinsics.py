@@ -6,21 +6,16 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_PATH = PROJECT_ROOT / "data" / "si_robot" / "camera_intrinsics.npz"
+OUTPUT_PATH = PROJECT_ROOT / "data" / "si_robot" / "image_to_probe_transform.npz"
 
-CAMERA_MATRIX = np.array(
+IMAGE_TO_PROBE = np.array(
     [
-        [1.552570805831235e3, 0.0, 960.0],
-        [0.0, 1.558233927349110e3, 540.0],
-        [0.0, 0.0, 1.0],
+        [-0.0070738, 0.0648917, -6.3876e-05, 180.39],
+        [ 0.065899, 0.00670635, 0.00420122, 34.7653],
+        [0.00422142, 0.0003658, -0.0656911, 13.3835],
+        [0.0, 0.0, 0.0, 1.0],
     ],
-    dtype=float,
-)
-
-# OpenCV order: k1, k2, p1, p2, k3.
-DISTORTION_COEFFICIENTS = np.array(
-    [-0.297863212023482, 0.403564940306343, 0.0, 0.0, 0.0],
-    dtype=float,
+    dtype=np.float64,
 )
 
 
@@ -29,8 +24,7 @@ def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         OUTPUT_PATH,
-        camera_matrix=CAMERA_MATRIX,
-        dist_coeffs=DISTORTION_COEFFICIENTS,
+        image_to_probe = IMAGE_TO_PROBE,
     )
     print(f"Saved camera intrinsics to: {OUTPUT_PATH}")
 
