@@ -11,6 +11,7 @@
   dependencies = [
       "ndicapi==3.7.5",
       "numpy==1.26.4",
+      "scipy>=1.10",
       "opencv-python",
       "pandas",
       "PyAutoGUI",

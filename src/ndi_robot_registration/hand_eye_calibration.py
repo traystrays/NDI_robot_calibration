@@ -287,7 +287,7 @@ class Calibration:
                 for a, b in zip(a_values, b_values)
             ]
         )
-        _, singular_values, vt_matrix = np.linalg.svd(rotation_system)
+        _, singular_values, vt_matrix = np.linalg.svd(rotation_system, full_matrices=False)
         raw_rotation = vt_matrix[-1].reshape((3, 3), order="F")
 
         # The homogeneous solution has arbitrary sign and scale.
